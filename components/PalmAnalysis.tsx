@@ -190,12 +190,13 @@ const PalmAnalysis: React.FC<PalmAnalysisProps> = ({ gender, palmState, setPalmS
         </header>
 
         {/* Archetype Hero Card */}
-        <div className="bg-gradient-to-br from-indigo-900 to-slate-900 p-8 rounded-[3rem] text-white space-y-2 shadow-2xl relative overflow-hidden">
-          <div className="absolute top-0 right-0 p-8 text-7xl opacity-10">✨</div>
+        <div className="bg-[linear-gradient(135deg,_#fffaf0_0%,_#fff7ed_38%,_#fef3c7_100%)] p-8 rounded-[3rem] space-y-3 shadow-2xl border border-amber-100 relative overflow-hidden">
+          <div className="absolute top-0 right-0 p-8 text-7xl opacity-30">✨</div>
+          <div className="absolute inset-0 bg-[radial-gradient(circle_at_top_left,_rgba(255,255,255,0.9),_transparent_48%)] pointer-events-none" />
           <div className="relative z-10">
-            <p className="text-[10px] font-black uppercase tracking-[0.3em] opacity-60">Hand Archetype</p>
-            <h3 className="sinhala text-3xl font-black">{result.archetype}</h3>
-            <p className="sinhala text-sm opacity-80 mt-2">ස්වභාවය: {result.handShape}</p>
+            <p className="text-[10px] font-black uppercase tracking-[0.3em] text-amber-700">Hand Archetype</p>
+            <h3 className="sinhala text-3xl font-black text-slate-900 leading-tight">{result.archetype}</h3>
+            <p className="sinhala text-sm text-slate-700 mt-3 leading-relaxed">ස්වභාවය: {result.handShape}</p>
           </div>
         </div>
 

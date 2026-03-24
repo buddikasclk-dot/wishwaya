@@ -444,11 +444,14 @@ Return JSON only.`,
       };
     });
 
+    const hasEnglishContent = (items: unknown) =>
+      Array.isArray(items) && items.some((item) => typeof item === 'string' && /[A-Za-z]/.test(item));
+
     return {
       matchingPercentage: localResult.matchingPercentage,
       table: finalTable,
-      dosha: Array.isArray(enhanced.dosha) && enhanced.dosha.length ? enhanced.dosha : localResult.dosha,
-      recommendations: Array.isArray(enhanced.recommendations) && enhanced.recommendations.length
+      dosha: Array.isArray(enhanced.dosha) && enhanced.dosha.length && !hasEnglishContent(enhanced.dosha) ? enhanced.dosha : localResult.dosha,
+      recommendations: Array.isArray(enhanced.recommendations) && enhanced.recommendations.length && !hasEnglishContent(enhanced.recommendations)
         ? enhanced.recommendations
         : localResult.recommendations,
     };

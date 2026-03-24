@@ -171,7 +171,7 @@ const Matching: React.FC<MatchingProps> = ({ userProfile, matchingState, setMatc
             <div className="mt-4 text-left p-6 bg-green-50 rounded-[2rem] border border-green-100">
               <div className="flex items-center space-x-2 mb-3">
                 <span className="text-lg">💡</span>
-                <h4 className="text-green-700 font-bold text-sm uppercase tracking-wider sinhala">යෝජනා (Recommendations)</h4>
+                <h4 className="text-green-700 font-bold text-sm uppercase tracking-wider sinhala">යෝජනා</h4>
               </div>
               <ul className="space-y-2">
                 {(matchingState.result?.recommendations || []).map((r, i) => (
@@ -270,7 +270,7 @@ const Matching: React.FC<MatchingProps> = ({ userProfile, matchingState, setMatc
           <button
             onClick={handleMatch}
             disabled={!partner.name || !partner.dob || !partner.birthTime || !partner.city}
-            className="w-full py-4 rounded-2xl font-bold shadow-lg shadow-pink-100 transition-all hover:scale-[1.02] active:scale-95 sinhala text-lg flex items-center justify-center bg-gradient-to-r from-pink-500 to-rose-500 text-white disabled:bg-pink-100 disabled:text-pink-500 disabled:shadow-none disabled:opacity-100"
+            className="w-full py-4 rounded-2xl font-bold shadow-lg shadow-pink-200 transition-all hover:scale-[1.02] active:scale-95 sinhala text-lg flex items-center justify-center bg-pink-600 text-white border border-pink-700 disabled:bg-pink-100 disabled:text-pink-500 disabled:border-pink-100 disabled:shadow-none disabled:opacity-100"
           >
             ගැලපීම පරීක්ෂා කරන්න
           </button>

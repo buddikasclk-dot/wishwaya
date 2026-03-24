@@ -33,6 +33,14 @@ const LawOfAttraction: React.FC<LawOfAttractionProps> = ({ profile }) => {
     return Math.abs(hash).toString(16).slice(0, 16);
   }, [profile.name, profile.dob, profile.city]);
 
+  const getNextUnlockTime = (lastCompletedDateISO: string) => {
+    const lastCompleted = new Date(lastCompletedDateISO);
+    const nextUnlockTime = new Date(lastCompleted);
+    nextUnlockTime.setDate(nextUnlockTime.getDate() + 1);
+    nextUnlockTime.setHours(5, 0, 0, 0);
+    return nextUnlockTime;
+  };
+
   const checkUnlockStatus = (chal: LOAChallenge): LOAChallenge => {
     if (!chal.startDateISO) return chal;
     
@@ -54,12 +62,8 @@ const LawOfAttraction: React.FC<LawOfAttractionProps> = ({ profile }) => {
       return { ...chal, unlockedDay: 1 };
     }
 
-    const lastCompleted = new Date(chal.lastCompletedDateISO);
     const now = new Date();
-    
-    // Strict 24 hour rule: "due to 24 hours of early day"
-    // The next day only unlocks after a full 24 hours have passed since the last completion
-    const nextUnlockTime = new Date(lastCompleted.getTime() + (24 * 60 * 60 * 1000));
+    const nextUnlockTime = getNextUnlockTime(chal.lastCompletedDateISO);
     
     if (now >= nextUnlockTime) {
       return { ...chal, unlockedDay: nextDayToUnlock };

@@ -1,0 +1,42 @@
+[
+  {
+    "userId": "user_24rms8evu",
+    "subscription": {
+      "endpoint": "https://fcm.googleapis.com/fcm/send/cf3lNjDhpNM:APA91bEDptS87euPXhaoS7H0MxmExDH-6BtgMMa0GV8C2WbXm29cLuQ7Jml4IPROYEnTvlBwSXI7aIWwEkrhmU8fXCQ0lKrAxU4vkdZqqBlmcGHQeGcLicVoMrrTIWKOOBE62d2YemBY",
+      "expirationTime": null,
+      "keys": {
+        "p256dh": "BFAt96zQUnn70cNgXSciDo9F6O4h5og5WmK8gWMVbOaIB_8u_n-_OihapZpO-kp8tGwPLmehZ3Dbq0d5LxgsYEQ",
+        "auth": "PtAzH8d76kj3osTYi3MU-A"
+      }
+    },
+    "location": {
+      "lat": 6.9271,
+      "lng": 79.8612
+    },
+    "horoscopeProfile": {
+      "name": "Buddika Weerasinghe",
+      "gender": "male",
+      "dob": "1991-09-23",
+      "birthTime": "14:03",
+      "city": "Kalthota",
+      "rashi": "Capricorn",
+      "lagna": "Capricorn",
+      "nekatha": "පුවපුටුප",
+      "lagnaAdhipathi": "ශනි",
+      "janmaRashiya": "මකර",
+      "rashyadhipathi": "ශනි",
+      "nekathPadaya": "2 වන පාදය",
+      "gana": "මනුෂ්‍ය ගණය",
+      "mismatchNotice": "",
+      "notifications": {
+        "enabled": true,
+        "horoscope": true,
+        "rahuKalaya": true,
+        "specialNekath": true,
+        "birthday": true
+      }
+    },
+    "createdAt": "2026-03-24T21:23:28.179Z",
+    "disabled": false
+  }
+]
