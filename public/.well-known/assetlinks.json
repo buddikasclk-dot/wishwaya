@@ -1,0 +1,12 @@
+[
+  {
+    "relation": ["delegate_permission/common.handle_all_urls"],
+    "target": {
+      "namespace": "android_app",
+      "package_name": "online.wishwaya.app",
+      "sha256_cert_fingerprints": [
+        "4C:84:37:37:DF:59:09:14:6F:1D:E6:85:A2:27:80:59:80:10:E6:A3:00:3B:0B:A5:95:89:9D:43:68:F2:1E:0B"
+      ]
+    }
+  }
+]

@@ -1,0 +1,109 @@
+
+{
+  "id": "/?source=pwa",
+  "name": "Wishwaya",
+  "short_name": "Wishwaya",
+  "description": "Premium AI-powered Sri Lankan Vedic Astrology, Porondam matching, and dream analysis. Discover your cosmic path with deep spiritual insights.",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#FFFFFF",
+  "theme_color": "#16a34a",
+  "lang": "si",
+  "dir": "ltr",
+  "categories": [
+    "lifestyle",
+    "spirituality"
+  ],
+  "iarc_rating_id": "pending",
+  "related_applications": [],
+  "prefer_related_applications": false,
+  "launch_handler": {
+    "client_mode": "focus-existing"
+  },
+  "handle_links": "auto",
+  "share_target": {
+    "action": "/?share=true",
+    "method": "GET",
+    "params": {
+      "title": "title",
+      "text": "text",
+      "url": "url"
+    }
+  },
+  "icons": [
+    {
+      "src": "/logo-192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "/logo-192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "maskable"
+    },
+    {
+      "src": "/logo-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "/logo-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "maskable"
+    }
+  ],
+  "screenshots": [
+    {
+      "src": "/HOME.png",
+      "type": "image/png",
+      "sizes": "1080x1920",
+      "form_factor": "narrow"
+    },
+    {
+      "src": "/MATCHING.png",
+      "type": "image/png",
+      "sizes": "1080x1920",
+      "form_factor": "narrow"
+    },
+    {
+      "src": "/NEKATH.png",
+      "type": "image/png",
+      "sizes": "1080x1920",
+      "form_factor": "narrow"
+    },
+    {
+      "src": "/OMENS.png",
+      "type": "image/png",
+      "sizes": "1080x1920",
+      "form_factor": "narrow"
+    },
+    {
+      "src": "/DREAMS.png",
+      "type": "image/png",
+      "sizes": "1080x1920",
+      "form_factor": "narrow"
+    }
+  ],
+  "shortcuts": [
+    {
+      "name": "පලාපල",
+      "url": "/#dashboard",
+      "description": "View your daily predictions"
+    },
+    {
+      "name": "නැකත්",
+      "url": "/#nekath",
+      "description": "Check auspicious times"
+    }
+  ],
+  "edge_side_panel": {
+    "preferred_width": 400
+  },
+  "widgets": []
+}

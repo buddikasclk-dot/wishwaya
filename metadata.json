@@ -1,0 +1,19 @@
+{
+  "name": "Wishwaya",
+  "short_name": "Wishwaya",
+  "description": "Premium AI-powered Sri Lankan Vedic Astrology, Porondam matching, and dream analysis. Discover your cosmic path with deep spiritual insights.",
+  "theme_color": "#16a34a",
+  "background_color": "#F9FBFA",
+  "display": "standalone",
+  "orientation": "portrait",
+  "scope": "/",
+  "start_url": "/",
+  "categories": [
+    "lifestyle",
+    "spirituality"
+  ],
+  "requestFramePermissions": [
+    "camera",
+    "geolocation"
+  ]
+}
