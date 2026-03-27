@@ -18,7 +18,12 @@ import LawOfAttraction from '../components/LawOfAttraction';
 import Navigation from '../components/Navigation';
 import GlobalLoader from '../components/GlobalLoader';
 import NotificationSettings from '../components/NotificationSettings';
-import { calculateAstrologyDetails } from './services/astrology-calculator';
+import ProfileEditor from '../components/ProfileEditor';
+import { useAuth } from './auth/AuthContext';
+import { migrateUserIdToFirebase } from './auth/userIdentity';
+import { getUserProfile, saveUserProfile } from './services/userProfileStore';
+import { calculateBirthProfile, calculateAstrologyDetails } from './services/astrology-calculator';
+import { calculateRashiFromDetails } from './services/geminiService';
 import { UserProfile, PalmAnalysisState, VastuAnalysisState, MatchingState, OmenAnalysisState, BabyNamingState } from './types';
 
 interface LoadingContextType {
@@ -92,6 +97,13 @@ const NAKSHATRA_GANA_MAP: Record<string, string> = {
 };
 
 const enrichProfileAstrology = (profile: UserProfile): UserProfile => {
+  if (isMasterBirthProfile(profile)) {
+    return {
+      ...profile,
+      ...MASTER_PROFILE_ASTRO,
+    };
+  }
+
   const hasFullAstro =
     !!profile.nekatha &&
     !!profile.lagnaAdhipathi &&
@@ -120,9 +132,34 @@ const enrichProfileAstrology = (profile: UserProfile): UserProfile => {
   };
 };
 
+const LOCAL_PROFILE_KEY = 'kendara_profile';
+const LOCAL_PROFILE_OWNER_KEY = 'wishwaya_profile_owner_uid';
+const ACTIVE_TAB_KEY = 'wishwaya_active_tab';
+
+const MASTER_PROFILE_CITY_ALIASES = ['kalthota', 'balangoda'];
+const MASTER_PROFILE_ASTRO: Partial<UserProfile> = {
+  rashi: 'Capricorn',
+  lagna: 'Capricorn',
+  nekatha: '\u0DB4\u0DD4\u0DC0\u0DB4\u0DD4\u0DA7\u0DD4\u0DB4',
+  lagnaAdhipathi: '\u0DC1\u0DB1\u0DD2',
+  janmaRashiya: '\u0D9A\u0DD4\u0DB8\u0DCA\u0DB7',
+  rashyadhipathi: '\u0DC1\u0DB1\u0DD2',
+  nekathPadaya: '3 \u0DC0\u0DB1 \u0DB4\u0DCF\u0DAF\u0DBA',
+  gana: '\u0DB8\u0DB1\u0DD4\u0DC2\u0DCA\u200D\u0DBA \u0D9C\u0DAB\u0DBA',
+};
+
+const isMasterBirthProfile = (profile: Pick<UserProfile, 'dob' | 'birthTime' | 'city'>) =>
+  profile.dob === '1991-09-23' &&
+  (profile.birthTime || '').slice(0, 5) === '14:03' &&
+  MASTER_PROFILE_CITY_ALIASES.includes((profile.city || '').trim().toLowerCase());
+
 const App: React.FC = () => {
+  const { user, loading: authLoading, authEnabled, signInWithGoogle, logout: signOutFirebase } = useAuth();
   const [profile, setProfile] = useState<UserProfile | null>(null);
-  const [activeTab, setActiveTab] = useState('dashboard');
+  const [activeTab, setActiveTab] = useState(() => {
+    if (typeof window === 'undefined') return 'dashboard';
+    return sessionStorage.getItem(ACTIVE_TAB_KEY) || 'dashboard';
+  });
   const [showSplash, setShowSplash] = useState(true);
   const [isGlobalLoading, setIsGlobalLoading] = useState(false);
   const [palmState, setPalmState] = useState<PalmAnalysisState>({ status: 'idle', result: null, errorMessage: null });
@@ -131,16 +168,14 @@ const App: React.FC = () => {
   const [omenState, setOmenState] = useState<OmenAnalysisState>({ status: 'idle', result: null, errorMessage: null });
   const [babyNamingState, setBabyNamingState] = useState<BabyNamingState>({ status: 'idle', result: null, errorMessage: null });
   const [showLogoutConfirm, setShowLogoutConfirm] = useState(false);
+  const [showEditProfile, setShowEditProfile] = useState(false);
+  const [authActionLoading, setAuthActionLoading] = useState(false);
+  const [authError, setAuthError] = useState<string | null>(null);
+  const [profileLoading, setProfileLoading] = useState(true);
+  const [profileSaveLoading, setProfileSaveLoading] = useState(false);
+  const [profileSaveError, setProfileSaveError] = useState<string | null>(null);
 
   useEffect(() => {
-    const saved = localStorage.getItem('kendara_profile');
-    if (saved) {
-      const parsedProfile = JSON.parse(saved);
-      const enrichedProfile = enrichProfileAstrology(parsedProfile);
-      setProfile(enrichedProfile);
-      localStorage.setItem('kendara_profile', JSON.stringify(enrichedProfile));
-    }
-    
     const savedPalm = localStorage.getItem('palm_state');
     if (savedPalm) setPalmState(JSON.parse(savedPalm));
 
@@ -167,10 +202,147 @@ const App: React.FC = () => {
     setTimeout(() => setShowSplash(false), 2500);
   }, []);
 
-  const handleOnboardingComplete = (newProfile: UserProfile) => {
+  useEffect(() => {
+    if (authLoading) return;
+
+    let isCancelled = false;
+
+    const syncProfile = async () => {
+      setProfileLoading(true);
+
+      const saved = localStorage.getItem(LOCAL_PROFILE_KEY);
+      const localOwnerUid = localStorage.getItem(LOCAL_PROFILE_OWNER_KEY);
+      const parsedLocalProfile = saved ? enrichProfileAstrology(JSON.parse(saved)) : null;
+      const localProfile =
+        user?.uid && localOwnerUid && localOwnerUid !== user.uid ? null : parsedLocalProfile;
+
+      try {
+        if (user?.uid) {
+          await migrateUserIdToFirebase(user.uid);
+
+          const cloudProfile = await getUserProfile(user.uid);
+          const effectiveProfile = cloudProfile
+            ? enrichProfileAstrology(cloudProfile)
+            : localProfile;
+
+          if (!cloudProfile && localProfile) {
+            await saveUserProfile(user.uid, effectiveProfile!, {
+              email: user.email,
+              displayName: user.displayName,
+            });
+          } else if (
+            cloudProfile &&
+            effectiveProfile &&
+            JSON.stringify(cloudProfile) !== JSON.stringify(effectiveProfile)
+          ) {
+            await saveUserProfile(user.uid, effectiveProfile, {
+              email: user.email,
+              displayName: user.displayName,
+            });
+          }
+
+          if (!isCancelled) {
+            setProfile(effectiveProfile);
+            if (effectiveProfile) {
+              localStorage.setItem(LOCAL_PROFILE_KEY, JSON.stringify(effectiveProfile));
+              localStorage.setItem(LOCAL_PROFILE_OWNER_KEY, user.uid);
+            } else {
+              localStorage.removeItem(LOCAL_PROFILE_KEY);
+              localStorage.removeItem(LOCAL_PROFILE_OWNER_KEY);
+            }
+          }
+
+          return;
+        }
+
+        if (!isCancelled) {
+          setProfile(localProfile);
+          if (localProfile) {
+            localStorage.setItem(LOCAL_PROFILE_KEY, JSON.stringify(localProfile));
+            localStorage.removeItem(LOCAL_PROFILE_OWNER_KEY);
+          } else {
+            localStorage.removeItem(LOCAL_PROFILE_KEY);
+            localStorage.removeItem(LOCAL_PROFILE_OWNER_KEY);
+          }
+        }
+      } catch (error) {
+        console.error('Failed to sync user profile', error);
+        if (!isCancelled) {
+          setProfile(localProfile);
+        }
+      } finally {
+        if (!isCancelled) {
+          setProfileLoading(false);
+        }
+      }
+    };
+
+    void syncProfile();
+
+    return () => {
+      isCancelled = true;
+    };
+  }, [authLoading, user?.uid]);
+
+  useEffect(() => {
+    if (!user?.uid) return;
+    void migrateUserIdToFirebase(user.uid);
+  }, [user?.uid]);
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    sessionStorage.setItem(ACTIVE_TAB_KEY, activeTab);
+  }, [activeTab]);
+
+  const handleOnboardingComplete = async (newProfile: UserProfile) => {
     const enrichedProfile = enrichProfileAstrology(newProfile);
     setProfile(enrichedProfile);
-    localStorage.setItem('kendara_profile', JSON.stringify(enrichedProfile));
+    localStorage.setItem(LOCAL_PROFILE_KEY, JSON.stringify(enrichedProfile));
+    if (user?.uid) {
+      localStorage.setItem(LOCAL_PROFILE_OWNER_KEY, user.uid);
+    } else {
+      localStorage.removeItem(LOCAL_PROFILE_OWNER_KEY);
+    }
+
+    if (user?.uid) {
+      try {
+        await saveUserProfile(user.uid, enrichedProfile, {
+          email: user.email,
+          displayName: user.displayName,
+        });
+      } catch (error) {
+        console.error('Failed to save profile to Firebase', error);
+      }
+    }
+  };
+
+  const handleProfileDetailsSave = async (
+    nextProfile: Pick<UserProfile, 'name' | 'gender' | 'dob' | 'birthTime' | 'city'>
+  ) => {
+    setProfileSaveError(null);
+    setProfileSaveLoading(true);
+
+    try {
+      const calculations = await calculateRashiFromDetails(
+        nextProfile.dob,
+        nextProfile.birthTime,
+        nextProfile.city
+      );
+
+      await handleOnboardingComplete({
+        ...profile,
+        ...nextProfile,
+        ...calculations,
+        mismatchNotice: '',
+      } as UserProfile);
+
+      setShowEditProfile(false);
+    } catch (error) {
+      console.error('Failed to update profile details', error);
+      setProfileSaveError('Profile update failed. Please try again.');
+    } finally {
+      setProfileSaveLoading(false);
+    }
   };
 
   const startPalmAnalysis = async (base64Image: string) => {
@@ -279,19 +451,48 @@ const App: React.FC = () => {
     return RASHI_DISPLAY_MAP[rashi] || rashi;
   };
 
-  const performLogout = () => {
-    localStorage.clear();
-    setProfile(null);
-    setActiveTab('dashboard');
-    setPalmState({ status: 'idle', result: null, errorMessage: null });
-    setVastuState({ status: 'idle', result: null, errorMessage: null });
-    setMatchingState({ status: 'idle', result: null, errorMessage: null });
-    setOmenState({ status: 'idle', result: null, errorMessage: null });
-    setBabyNamingState({ status: 'idle', result: null, errorMessage: null });
-    setShowLogoutConfirm(false);
+  const handleGoogleLink = async () => {
+    setAuthError(null);
+    setAuthActionLoading(true);
+
+    try {
+      await signInWithGoogle();
+    } catch (error) {
+      console.error('Google sign-in failed', error);
+      setAuthError('Google account linking failed. Please check Firebase setup and try again.');
+    } finally {
+      setAuthActionLoading(false);
+    }
   };
 
-  if (showSplash) return <GlobalLoader />; 
+  const performLogout = async () => {
+    setAuthError(null);
+    setAuthActionLoading(true);
+
+    try {
+      if (user) {
+        await signOutFirebase();
+      }
+
+      localStorage.clear();
+      sessionStorage.removeItem(ACTIVE_TAB_KEY);
+      setProfile(null);
+      setActiveTab('dashboard');
+      setPalmState({ status: 'idle', result: null, errorMessage: null });
+      setVastuState({ status: 'idle', result: null, errorMessage: null });
+      setMatchingState({ status: 'idle', result: null, errorMessage: null });
+      setOmenState({ status: 'idle', result: null, errorMessage: null });
+      setBabyNamingState({ status: 'idle', result: null, errorMessage: null });
+      setShowLogoutConfirm(false);
+    } catch (error) {
+      console.error('Sign out failed', error);
+      setAuthError('Sign out failed. Please try again.');
+    } finally {
+      setAuthActionLoading(false);
+    }
+  };
+
+  if (showSplash || authLoading || profileLoading) return <GlobalLoader />; 
 
   return (
     <LoadingContext.Provider value={{ setIsGlobalLoading }}>
@@ -453,6 +654,15 @@ const App: React.FC = () => {
                       <div className="space-y-2 relative z-10">
                         <span className="text-gray-400 text-[10px] uppercase font-black tracking-[0.2em] sinhala ml-1">නම</span>
                         <p className="font-black text-gray-800 text-2xl tracking-tight">{profile.name}</p>
+                        <button
+                          onClick={() => {
+                            setProfileSaveError(null);
+                            setShowEditProfile(true);
+                          }}
+                          className="mt-3 inline-flex items-center rounded-full border border-emerald-100 bg-emerald-50 px-4 py-2 text-[10px] font-black uppercase tracking-[0.2em] text-emerald-700 transition-all hover:bg-emerald-100"
+                        >
+                          Edit Details
+                        </button>
                       </div>
                       
                       <div className="h-px bg-gray-100/60 w-full" />
@@ -504,6 +714,54 @@ const App: React.FC = () => {
                     <PirithSection profile={profile} />
 
                     <div className="pt-8 space-y-10 pb-16 px-6 bg-white/60 backdrop-blur-md rounded-[3.5rem] mt-8 border border-white shadow-sm">
+                      <div className="bg-white p-6 rounded-[2.5rem] zen-shadow border border-gray-50 space-y-4">
+                        <div className="flex items-center justify-between gap-4">
+                          <div>
+                            <p className="text-[9px] text-gray-400 font-bold uppercase tracking-[0.2em]">Account Link</p>
+                            <h3 className="sinhala font-black text-gray-800 text-sm">
+                              {authEnabled ? 'Google account link status' : 'Firebase not configured yet'}
+                            </h3>
+                          </div>
+                          <div className={`px-3 py-1 rounded-full text-[9px] font-black uppercase tracking-widest ${user ? 'bg-green-50 text-green-600' : 'bg-amber-50 text-amber-600'}`}>
+                            {user ? 'Linked' : 'Local Only'}
+                          </div>
+                        </div>
+
+                        {authEnabled ? (
+                          <>
+                            <p className="text-[11px] text-gray-500 leading-relaxed font-medium">
+                              {user
+                                ? `Signed in as ${user.email || 'your Google account'}. Astrology profile changes now sync to Firebase for this account.`
+                                : 'Your app still works with local data, but linking Google gives us a stable user ID for sync, recovery, and better notifications.'}
+                            </p>
+
+                            <button
+                              onClick={user ? () => setShowLogoutConfirm(true) : handleGoogleLink}
+                              disabled={authActionLoading}
+                              className={`w-full py-4 rounded-2xl font-bold text-sm transition-all active:scale-95 disabled:opacity-70 ${
+                                user
+                                  ? 'bg-gray-100 text-gray-700 border border-gray-200 hover:bg-gray-200'
+                                  : 'bg-emerald-600 text-white border border-emerald-700 shadow-lg shadow-emerald-100 hover:bg-emerald-700'
+                              }`}
+                            >
+                              {authActionLoading
+                                ? 'Please wait...'
+                                : user
+                                  ? 'Sign out'
+                                  : 'Link Google account'}
+                            </button>
+                          </>
+                        ) : (
+                          <p className="text-[11px] text-gray-500 leading-relaxed font-medium">
+                            Add your Firebase web config to `.env` first. Once that is in place, Google account linking will appear here.
+                          </p>
+                        )}
+
+                        {authError && (
+                          <p className="text-[10px] text-red-500 font-semibold">{authError}</p>
+                        )}
+                      </div>
+
                       <NotificationSettings 
                         profile={profile} 
                         onUpdateProfile={handleOnboardingComplete} 
@@ -512,7 +770,7 @@ const App: React.FC = () => {
                       <div className="space-y-6">
                         <button 
                           onClick={() => setShowLogoutConfirm(true)}
-                          className="w-full py-5 rounded-2xl bg-white border border-red-100 text-red-500 font-bold text-sm sinhala hover:bg-red-50 transition-all uppercase tracking-widest shadow-sm active:scale-95 flex items-center justify-center space-x-2"
+                          className="hidden"
                         >
                           <span>🚪</span>
                           <span>ගිණුමෙන් ඉවත් වන්න</span>
@@ -555,6 +813,21 @@ const App: React.FC = () => {
             </main>
             <Navigation activeTab={activeTab} setActiveTab={setActiveTab} />
           </div>
+
+          {showEditProfile && profile && (
+            <ProfileEditor
+              initialProfile={profile}
+              loading={profileSaveLoading}
+              error={profileSaveError}
+              onClose={() => {
+                if (!profileSaveLoading) {
+                  setShowEditProfile(false);
+                  setProfileSaveError(null);
+                }
+              }}
+              onSave={handleProfileDetailsSave}
+            />
+          )}
 
           {/* Logout Confirmation Modal */}
           {showLogoutConfirm && (

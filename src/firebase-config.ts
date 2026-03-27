@@ -1,30 +1,37 @@
+import { initializeApp } from 'firebase/app';
+import { getAuth, GoogleAuthProvider } from 'firebase/auth';
+import { getFirestore } from 'firebase/firestore';
+import { getMessaging, isSupported } from 'firebase/messaging';
 
-import { initializeApp } from "firebase/app";
-import { getMessaging, getToken, onMessage } from "firebase/messaging";
-
-// Note: Values typically provided in Firebase Console
 const firebaseConfig = {
-  apiKey: "YOUR_API_KEY",
-  authDomain: "wishwaya.firebaseapp.com",
-  projectId: "wishwaya",
-  storageBucket: "wishwaya.appspot.com",
-  messagingSenderId: "YOUR_SENDER_ID",
-  appId: "YOUR_APP_ID"
+  apiKey: import.meta.env.VITE_FIREBASE_API_KEY,
+  authDomain: import.meta.env.VITE_FIREBASE_AUTH_DOMAIN,
+  projectId: import.meta.env.VITE_FIREBASE_PROJECT_ID,
+  storageBucket: import.meta.env.VITE_FIREBASE_STORAGE_BUCKET,
+  messagingSenderId: import.meta.env.VITE_FIREBASE_MESSAGING_SENDER_ID,
+  appId: import.meta.env.VITE_FIREBASE_APP_ID,
 };
 
-const app = initializeApp(firebaseConfig);
-export const messaging = typeof window !== 'undefined' ? getMessaging(app) : null;
+const hasFirebaseConfig = Object.values(firebaseConfig).every(
+  (value) => typeof value === 'string' && value.trim().length > 0
+);
 
-export const requestPushToken = async (vapidKey: string) => {
-  if (!messaging) return null;
-  try {
-    const permission = await Notification.requestPermission();
-    if (permission === 'granted') {
-      return await getToken(messaging, { vapidKey });
-    }
-    return null;
-  } catch (error) {
-    console.error("FCM Token Error:", error);
-    return null;
-  }
+export const firebaseApp = hasFirebaseConfig ? initializeApp(firebaseConfig) : null;
+export const firebaseAuth = firebaseApp ? getAuth(firebaseApp) : null;
+export const firebaseDb = firebaseApp ? getFirestore(firebaseApp) : null;
+export const googleProvider = firebaseApp ? new GoogleAuthProvider() : null;
+
+if (googleProvider) {
+  googleProvider.setCustomParameters({ prompt: 'select_account' });
+}
+
+export const isFirebaseConfigured = hasFirebaseConfig;
+
+export const getFirebaseMessaging = async () => {
+  if (!firebaseApp) return null;
+
+  const supported = await isSupported().catch(() => false);
+  if (!supported) return null;
+
+  return getMessaging(firebaseApp);
 };
