@@ -7,7 +7,7 @@ const PIRITH_DATA = [
     id: 'jaya',
     title: "ජය පිරිත",
     sub: "විජයග්‍රහණය සහ ආරක්ෂාව",
-    url: "https://thegreenceylon.lk/wp-content/uploads/2026/02/Jaya.mp3",
+    url: "/Jaya.MP3",
     benefits: ["බාධා ජය ගැනීම", "සිහින බිය දුරු කිරීම", "මානසික ශක්තිය"],
     bestTime: "බ්‍රහස්පතින්දා හෝ ඕනෑම දිනක උදෑසන",
     tags: ['success', 'protection']
@@ -16,7 +16,7 @@ const PIRITH_DATA = [
     id: 'rathnamali',
     title: "රත්නමාලී ගාථා",
     sub: "ආශිර්වාදය සහ මනසේ සාමය",
-    url: "https://thegreenceylon.lk/wp-content/uploads/2026/02/Rathnamali.mp3",
+    url: "/Rathnamali.MP3",
     benefits: ["දේව ආරක්ෂාව", "අහිතකර ශක්තීන් දුරු කිරීම", "නව වැඩ සාර්ථක වීම"],
     bestTime: "සෙනසුරාදා හෝ අඟහරුවාදා සවස",
     tags: ['blessing', 'peace']
@@ -25,7 +25,7 @@ const PIRITH_DATA = [
     id: 'antharaya',
     title: "අන්තරාය නිවාරණ පිරිත",
     sub: "අනතුරු සහ බාධා වැලැක්වීම",
-    url: "https://thegreenceylon.lk/wp-content/uploads/2026/02/antharaya_niwarana.mp3",
+    url: "/antharaya_niwarana.MP3",
     benefits: ["අනතුරුවලින් ආරක්ෂාව", "ගමන් බිමන් සුරක්ෂිතතාව", "බාධා ඉවත් කිරීම"],
     bestTime: "සිකුරාදා හෝ ගමන් බිමන් යාමට පෙර",
     tags: ['protection', 'safety']
@@ -34,7 +34,7 @@ const PIRITH_DATA = [
     id: 'siwali',
     title: "සීවලී පිරිත",
     sub: "ධන වාසනාව සහ දියුණුව",
-    url: "https://thegreenceylon.lk/wp-content/uploads/2026/02/Seewali.mp3",
+    url: "/Seewali.MP3",
     benefits: ["ධනය ආකර්ෂණය", "ව්‍යාපාරික දියුණුව", "නිවසේ සෞභාග්‍යය"],
     bestTime: "සිකුරාදා හෝ බදාදා උදෑසන",
     tags: ['wealth', 'luck']
@@ -43,7 +43,7 @@ const PIRITH_DATA = [
     id: 'angulimala',
     title: "අංගුලිමාල පිරිත",
     sub: "සෞඛ්‍යය සහ ආරක්ෂාව",
-    url: "https://thegreenceylon.lk/wp-content/uploads/2026/02/AngulimalaPiritha.mp3",
+    url: "/Angulimala.MP3",
     benefits: ["නීරෝගී සම්පත", "ලේ දෝෂ දුරු වීම", "ගර්භණී මව්වරුන්ට සෙත් පැතීම"],
     bestTime: "සඳුදා හෝ බ්‍රහස්පතින්දා",
     tags: ['health', 'protection']
@@ -52,7 +52,7 @@ const PIRITH_DATA = [
     id: 'karaniya',
     title: "කරණීය මෙත්ත සූත්‍රය",
     sub: "මෙත් සිතිවිලි සහ සැනසීම",
-    url: "https://thegreenceylon.lk/wp-content/uploads/2026/02/Karaniya.mp3",
+    url: "/Karaniya.MP3",
     benefits: ["භය දුරු කිරීම", "අමනුෂ්‍ය බලපෑම් දුරු වීම", "සතුටුදායක නින්ද"],
     bestTime: "රාත්‍රී නින්දට පෙර හෝ පෝය දිනවල",
     tags: ['peace', 'kindness']
@@ -61,7 +61,7 @@ const PIRITH_DATA = [
     id: 'mangala',
     title: "මහා මංගල සූත්‍රය",
     sub: "ජීවිතයේ මංගල කරුණු",
-    url: "https://thegreenceylon.lk/wp-content/uploads/2026/02/mangala.mp3",
+    url: "/mangala.MP3",
     benefits: ["නිවසේ සමගිය", "පවුලේ දියුණුව", "සෑම වැඩකම සාර්ථකත්වය"],
     bestTime: "ඕනෑම දිනක උදෑසන",
     tags: ['family', 'success']
@@ -70,7 +70,7 @@ const PIRITH_DATA = [
     id: 'rathana',
     title: "රතන සූත්‍රය",
     sub: "උපද්‍රව දුරු කිරීමේ මහා බලය",
-    url: "https://thegreenceylon.lk/wp-content/uploads/2026/02/Rathana.mp3",
+    url: "/Rathana.MP3",
     benefits: ["වසංගත හා බිය දුරු කිරීම", "රෝගාබාධවලින් සහනය", "ත්‍රිවිධ රත්නයේ ආරක්ෂාව"],
     bestTime: "අසනීප තත්වයකදී හෝ ඕනෑම දිනක සවස",
     tags: ['health', 'protection', 'blessing']
@@ -110,21 +110,21 @@ const getHoroscopicReason = (rashi: string, pirithId: string): string => {
   return `${prefix} ${suffix}`;
 };
 
-const PirithCard: React.FC<{ pirith: typeof PIRITH_DATA[0], type: 'Personalized' | 'General', rashi: string }> = ({ pirith, type, rashi }) => {
+const PirithCard: React.FC<{
+  pirith: typeof PIRITH_DATA[0],
+  type: 'Personalized' | 'General',
+  rashi: string,
+  activePirithId: string | null,
+  onToggle: (pirithId: string) => void
+}> = ({ pirith, type, rashi, activePirithId, onToggle }) => {
   const [isPlaying, setIsPlaying] = useState(false);
   const [currentTime, setCurrentTime] = useState(0);
   const [duration, setDuration] = useState(0);
   const audioRef = useRef<HTMLAudioElement>(null);
+  const isActive = activePirithId === pirith.id;
 
   const togglePlay = () => {
-    if (audioRef.current) {
-      if (isPlaying) {
-        audioRef.current.pause();
-      } else {
-        audioRef.current.play();
-      }
-      setIsPlaying(!isPlaying);
-    }
+    onToggle(pirith.id);
   };
 
   const handleSeek = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -152,6 +152,25 @@ const PirithCard: React.FC<{ pirith: typeof PIRITH_DATA[0], type: 'Personalized'
       audio.removeEventListener('ended', handleEnded);
     };
   }, []);
+
+  useEffect(() => {
+    const audio = audioRef.current;
+    if (!audio) return;
+
+    if (isActive) {
+      void audio.play().then(() => {
+        setIsPlaying(true);
+      }).catch(() => {
+        setIsPlaying(false);
+      });
+      return;
+    }
+
+    audio.pause();
+    audio.currentTime = 0;
+    setCurrentTime(0);
+    setIsPlaying(false);
+  }, [isActive]);
 
   const formatTime = (time: number) => {
     const minutes = Math.floor(time / 60);
@@ -237,6 +256,8 @@ const PirithCard: React.FC<{ pirith: typeof PIRITH_DATA[0], type: 'Personalized'
 };
 
 const PirithSection: React.FC<{ profile: UserProfile }> = ({ profile }) => {
+  const [activePirithId, setActivePirithId] = useState<string | null>(null);
+
   const selectedPiriths = useMemo(() => {
     const rashi = profile.rashi || 'Aries';
     let personalizedIds: string[] = [];
@@ -258,6 +279,10 @@ const PirithSection: React.FC<{ profile: UserProfile }> = ({ profile }) => {
     return { personalized, general };
   }, [profile]);
 
+  const handlePirithToggle = (pirithId: string) => {
+    setActivePirithId((current) => current === pirithId ? null : pirithId);
+  };
+
   return (
     <div className="space-y-8 pt-4 text-left">
       <div className="flex items-center justify-between px-2">
@@ -270,7 +295,14 @@ const PirithSection: React.FC<{ profile: UserProfile }> = ({ profile }) => {
       
       <div className="grid gap-6">
         {selectedPiriths.personalized.map((p) => (
-          <PirithCard key={p.id} pirith={p} type="Personalized" rashi={profile.rashi || 'Aries'} />
+          <PirithCard
+            key={p.id}
+            pirith={p}
+            type="Personalized"
+            rashi={profile.rashi || 'Aries'}
+            activePirithId={activePirithId}
+            onToggle={handlePirithToggle}
+          />
         ))}
         <div className="flex items-center space-x-4 px-4 opacity-30">
           <div className="h-px bg-gray-300 flex-1"></div>
@@ -278,7 +310,14 @@ const PirithSection: React.FC<{ profile: UserProfile }> = ({ profile }) => {
           <div className="h-px bg-gray-300 flex-1"></div>
         </div>
         {selectedPiriths.general.map((p) => (
-          <PirithCard key={p.id} pirith={p} type="General" rashi={profile.rashi || 'Aries'} />
+          <PirithCard
+            key={p.id}
+            pirith={p}
+            type="General"
+            rashi={profile.rashi || 'Aries'}
+            activePirithId={activePirithId}
+            onToggle={handlePirithToggle}
+          />
         ))}
       </div>
     </div>

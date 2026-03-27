@@ -45,10 +45,13 @@ app.use(cors());
 app.use(bodyParser.json());
 
 // Data Storage
-// In Cloud Run (production), use /tmp as it's the only writable path
-const DATA_DIR = process.env.NODE_ENV === 'production' 
-  ? '/tmp/wishwaya-data' 
-  : path.join(process.cwd(), 'src/data');
+// In Cloud Run (production), use /tmp as it's the only writable path.
+// In development, keep runtime files out of src/ so Vite does not hot-reload the app
+// whenever subscriptions or VAPID keys change.
+const DATA_DIR = process.env.NODE_ENV === 'production'
+  ? '/tmp/wishwaya-data'
+  : path.join(process.cwd(), 'data');
+const LEGACY_DATA_DIR = path.join(process.cwd(), 'src/data');
 
 console.log(`Using DATA_DIR: ${DATA_DIR}`);
 
@@ -64,6 +67,25 @@ if (!fs.existsSync(DATA_DIR)) {
 const SUBSCRIPTIONS_FILE = path.join(DATA_DIR, 'subscriptions.json');
 const VAPID_KEYS_FILE = path.join(DATA_DIR, 'vapid.json');
 
+const migrateLegacyRuntimeFile = (fileName: string) => {
+  const currentPath = path.join(DATA_DIR, fileName);
+  const legacyPath = path.join(LEGACY_DATA_DIR, fileName);
+
+  if (fs.existsSync(currentPath) || !fs.existsSync(legacyPath)) {
+    return;
+  }
+
+  try {
+    fs.copyFileSync(legacyPath, currentPath);
+    console.log(`Migrated legacy runtime file: ${fileName}`);
+  } catch (err) {
+    console.error(`Failed to migrate legacy runtime file ${fileName}:`, err);
+  }
+};
+
+migrateLegacyRuntimeFile('subscriptions.json');
+migrateLegacyRuntimeFile('vapid.json');
+
 
 // Helper to load subscriptions
 const getSubscriptions = () => {
@@ -74,6 +96,10 @@ const getSubscriptions = () => {
     console.error('Error reading subscriptions:', err);
     return [];
   }
+};
+
+const writeSubscriptions = (subscriptions: any[]) => {
+  fs.writeFileSync(SUBSCRIPTIONS_FILE, JSON.stringify(subscriptions, null, 2));
 };
 
 // Helper to save subscriptions
@@ -108,7 +134,7 @@ const saveSubscription = (subscription: any, userId: string, location: any, horo
       subs.push(newSub);
     }
 
-    fs.writeFileSync(SUBSCRIPTIONS_FILE, JSON.stringify(subs, null, 2));
+    writeSubscriptions(subs);
   } catch (err) {
     console.error('Error saving subscription:', err);
   }
@@ -126,10 +152,39 @@ const updateSubscriptionProfile = (userId: string, profile: any) => {
       }
     });
     if (updated) {
-      fs.writeFileSync(SUBSCRIPTIONS_FILE, JSON.stringify(subs, null, 2));
+      writeSubscriptions(subs);
     }
+    return subs.filter((s: any) => s.userId === userId).length;
   } catch (err) {
     console.error('Error updating profile:', err);
+    return 0;
+  }
+};
+
+const relinkSubscriptions = (fromUserId: string, toUserId: string) => {
+  try {
+    const subs = getSubscriptions();
+    let updated = false;
+
+    subs.forEach((s: any) => {
+      if (s.userId === fromUserId) {
+        s.userId = toUserId;
+        updated = true;
+      }
+    });
+
+    if (updated) {
+      // De-duplicate by endpoint after relinking so one device keeps one record.
+      const deduped = Array.from(
+        new Map(subs.map((sub: any) => [sub.subscription?.endpoint, sub])).values()
+      );
+      writeSubscriptions(deduped);
+    }
+
+    return updated;
+  } catch (err) {
+    console.error('Error relinking subscriptions:', err);
+    return false;
   }
 };
 
@@ -338,8 +393,21 @@ app.post('/api/push/preferences', (req, res) => {
   if (!userId || !preferences) {
     return res.status(400).json({ error: 'Invalid data' });
   }
-  updateSubscriptionProfile(userId, { notifications: preferences });
-  res.json({ message: 'Preferences updated successfully' });
+  const updatedCount = updateSubscriptionProfile(userId, { notifications: preferences });
+  res.json({
+    message: 'Preferences updated successfully',
+    updatedCount,
+  });
+});
+
+app.post('/api/push/link-user', (req, res) => {
+  const { fromUserId, toUserId } = req.body;
+  if (!fromUserId || !toUserId) {
+    return res.status(400).json({ error: 'Invalid data' });
+  }
+
+  const updated = relinkSubscriptions(fromUserId, toUserId);
+  res.json({ message: updated ? 'Subscriptions linked successfully' : 'No subscriptions needed linking' });
 });
 
 // Unsubscribe
@@ -347,7 +415,7 @@ app.post('/api/push/unsubscribe', (req, res) => {
   const { endpoint } = req.body;
   let subs = getSubscriptions();
   subs = subs.filter((s: any) => s.subscription.endpoint !== endpoint);
-  fs.writeFileSync(SUBSCRIPTIONS_FILE, JSON.stringify(subs, null, 2));
+  writeSubscriptions(subs);
   res.json({ message: 'Unsubscribed successfully' });
 });
 
@@ -355,23 +423,60 @@ app.post('/api/push/unsubscribe', (req, res) => {
 app.post('/api/notify/send', async (req, res) => {
   const { userId, title, body, url } = req.body;
   const subs = getSubscriptions().filter((s: any) => s.userId === userId && !s.disabled);
-  
+
+  if (subs.length === 0) {
+    return res.json({
+      message: 'No active subscriptions for this user',
+      attemptedCount: 0,
+      sentCount: 0,
+      failedCount: 0,
+      removedCount: 0,
+    });
+  }
+
   const payload = JSON.stringify({ title, body, url });
-  
-  const promises = subs.map((sub: any) => 
-    webpush.sendNotification(sub.subscription, payload)
-      .catch(err => {
-        if (err.statusCode === 410) {
-          // Subscription expired, remove it
-          console.log(`Subscription expired for user ${userId}`);
-          // Logic to remove... (simplified for brevity)
-        }
+
+  const deliveryResults = await Promise.all(
+    subs.map(async (sub: any) => {
+      try {
+        await webpush.sendNotification(sub.subscription, payload);
+        return { endpoint: sub.subscription.endpoint, status: 'sent' as const };
+      } catch (err: any) {
+        const expired = err?.statusCode === 410 || err?.statusCode === 404;
         console.error('Error sending notification:', err);
-      })
+        return {
+          endpoint: sub.subscription.endpoint,
+          status: expired ? ('expired' as const) : ('failed' as const),
+          code: err?.statusCode || null,
+        };
+      }
+    })
   );
 
-  await Promise.all(promises);
-  res.json({ message: `Sent to ${subs.length} devices` });
+  const removedEndpoints = new Set(
+    deliveryResults
+      .filter((result: any) => result.status === 'expired')
+      .map((result: any) => result.endpoint)
+  );
+
+  if (removedEndpoints.size > 0) {
+    const nextSubs = getSubscriptions().filter(
+      (sub: any) => !removedEndpoints.has(sub.subscription?.endpoint)
+    );
+    writeSubscriptions(nextSubs);
+  }
+
+  const sentCount = deliveryResults.filter((result: any) => result.status === 'sent').length;
+  const failedCount = deliveryResults.filter((result: any) => result.status === 'failed').length;
+  const removedCount = removedEndpoints.size;
+
+  res.json({
+    message: `Attempted delivery to ${subs.length} device${subs.length === 1 ? '' : 's'}`,
+    attemptedCount: subs.length,
+    sentCount,
+    failedCount,
+    removedCount,
+  });
 });
 
 

@@ -1,4 +1,6 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
+import { useAuth } from '../src/auth/AuthContext';
+import { getEffectiveUserId, migrateUserIdToFirebase } from '../src/auth/userIdentity';
 import { UserProfile } from '../types';
 
 interface NotificationSettingsProps {
@@ -11,10 +13,11 @@ const defaultPrefs = {
   horoscope: true,
   rahuKalaya: true,
   specialNekath: true,
-  birthday: true
+  birthday: true,
 };
 
 const NotificationSettings: React.FC<NotificationSettingsProps> = ({ profile, onUpdateProfile }) => {
+  const { user } = useAuth();
   const [isSubscribed, setIsSubscribed] = useState(false);
   const [loading, setLoading] = useState(false);
   const [showPermissionModal, setShowPermissionModal] = useState(false);
@@ -27,8 +30,53 @@ const NotificationSettings: React.FC<NotificationSettingsProps> = ({ profile, on
     'PushManager' in window;
 
   useEffect(() => {
+    setPrefs(profile.notifications || defaultPrefs);
+  }, [profile.notifications]);
+
+  useEffect(() => {
     void checkSubscription();
   }, []);
+
+  useEffect(() => {
+    if (!user?.uid) return;
+    void migrateUserIdToFirebase(user.uid);
+  }, [user?.uid]);
+
+  const permission = supportsNotifications ? window.Notification.permission : 'denied';
+
+  const statusText = useMemo(() => {
+    if (!supportsNotifications) {
+      return 'Push notifications are not supported on this browser.';
+    }
+
+    if (permission !== 'granted') {
+      return 'Push notifications are off. Browser permission is still needed.';
+    }
+
+    if (!isSubscribed) {
+      return 'Push notifications are off for this device.';
+    }
+
+    if (!prefs.enabled) {
+      return 'Push notifications are paused for this device.';
+    }
+
+    return 'Push notifications are on for this device.';
+  }, [isSubscribed, permission, prefs.enabled, supportsNotifications]);
+
+  const urlBase64ToUint8Array = (base64String: string) => {
+    const padding = '='.repeat((4 - (base64String.length % 4)) % 4);
+    const base64 = (base64String + padding).replace(/-/g, '+').replace(/_/g, '/');
+
+    const rawData = window.atob(base64);
+    const outputArray = new Uint8Array(rawData.length);
+
+    for (let i = 0; i < rawData.length; ++i) {
+      outputArray[i] = rawData.charCodeAt(i);
+    }
+
+    return outputArray;
+  };
 
   const checkSubscription = async () => {
     if (!supportsNotifications) {
@@ -46,20 +94,25 @@ const NotificationSettings: React.FC<NotificationSettingsProps> = ({ profile, on
     }
   };
 
-  const urlBase64ToUint8Array = (base64String: string) => {
-    const padding = '='.repeat((4 - (base64String.length % 4)) % 4);
-    const base64 = (base64String + padding)
-      .replace(/-/g, '+')
-      .replace(/_/g, '/');
+  const syncSubscription = async (nextProfile: UserProfile, nextPrefs: typeof defaultPrefs) => {
+    if (!supportsNotifications) return;
 
-    const rawData = window.atob(base64);
-    const outputArray = new Uint8Array(rawData.length);
+    const registration = await navigator.serviceWorker.ready;
+    const subscription = await registration.pushManager.getSubscription();
+    if (!subscription) return;
 
-    for (let i = 0; i < rawData.length; ++i) {
-      outputArray[i] = rawData.charCodeAt(i);
-    }
+    const userId = user?.uid ? await migrateUserIdToFirebase(user.uid) : getEffectiveUserId(null);
 
-    return outputArray;
+    await fetch('/api/push/subscribe', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        subscription,
+        userId,
+        location: { lat: 6.9271, lng: 79.8612 },
+        horoscopeProfile: { ...nextProfile, notifications: nextPrefs },
+      }),
+    });
   };
 
   const updatePrefs = async (newPrefs: typeof defaultPrefs) => {
@@ -67,35 +120,20 @@ const NotificationSettings: React.FC<NotificationSettingsProps> = ({ profile, on
     const newProfile = { ...profile, notifications: newPrefs };
     onUpdateProfile(newProfile);
 
-    if (isSubscribed) {
-      const userId = localStorage.getItem('wishwaya_user_id');
-      if (userId) {
-        try {
-          await fetch('/api/push/preferences', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ userId, preferences: newPrefs })
-          });
-        } catch (error) {
-          console.error('Failed to sync preferences', error);
-        }
-      }
-    }
-  };
+    const userId = getEffectiveUserId(user?.uid);
+    if (!userId || !isSubscribed) return;
 
-  const handleToggleMaster = async () => {
-    if (!supportsNotifications) {
-      alert('ඔබ භාවිතා කරන බ්‍රව්සරය හෝ උපාංගය notifications සඳහා සහය නොදක්වයි. කරුණාකර Chrome හෝ Edge වැනි browser එකකින් නැවත උත්සාහ කරන්න.');
-      return;
-    }
+    try {
+      await fetch('/api/push/preferences', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ userId, preferences: newPrefs }),
+      });
 
-    if (!isSubscribed) {
-      setShowPermissionModal(true);
-      return;
+      await syncSubscription(newProfile, newPrefs);
+    } catch (error) {
+      console.error('Failed to sync notification preferences', error);
     }
-
-    const newPrefs = { ...prefs, enabled: !prefs.enabled };
-    await updatePrefs(newPrefs);
   };
 
   const requestPermissionAndSubscribe = async () => {
@@ -107,8 +145,8 @@ const NotificationSettings: React.FC<NotificationSettingsProps> = ({ profile, on
         throw new Error('NOTIFICATION_UNSUPPORTED');
       }
 
-      const permission = await window.Notification.requestPermission();
-      if (permission !== 'granted') {
+      const permissionResult = await window.Notification.requestPermission();
+      if (permissionResult !== 'granted') {
         throw new Error('PERMISSION_DENIED');
       }
 
@@ -119,31 +157,11 @@ const NotificationSettings: React.FC<NotificationSettingsProps> = ({ profile, on
 
       const subscription = await registration.pushManager.subscribe({
         userVisibleOnly: true,
-        applicationServerKey: convertedVapidKey
+        applicationServerKey: convertedVapidKey,
       });
 
-      let userId = localStorage.getItem('wishwaya_user_id');
-      if (!userId) {
-        userId = `user_${Math.random().toString(36).slice(2, 11)}`;
-        localStorage.setItem('wishwaya_user_id', userId);
-      }
-
-      let location = { lat: 6.9271, lng: 79.8612 };
-      if (navigator.geolocation) {
-        try {
-          const position = await new Promise<GeolocationPosition>((resolve, reject) => {
-            navigator.geolocation.getCurrentPosition(resolve, reject, { timeout: 5000 });
-          });
-          location = {
-            lat: position.coords.latitude,
-            lng: position.coords.longitude
-          };
-        } catch (error) {
-          console.error('Geolocation unavailable for notifications', error);
-        }
-      }
-
-      const initialPrefs = { ...prefs, enabled: true };
+      const userId = user?.uid ? await migrateUserIdToFirebase(user.uid) : getEffectiveUserId(null);
+      const nextPrefs = { ...prefs, enabled: true };
 
       await fetch('/api/push/subscribe', {
         method: 'POST',
@@ -151,154 +169,115 @@ const NotificationSettings: React.FC<NotificationSettingsProps> = ({ profile, on
         body: JSON.stringify({
           subscription,
           userId,
-          location,
-          horoscopeProfile: { ...profile, notifications: initialPrefs }
-        })
+          location: { lat: 6.9271, lng: 79.8612 },
+          horoscopeProfile: { ...profile, notifications: nextPrefs },
+        }),
       });
 
       setIsSubscribed(true);
-      setPrefs(initialPrefs);
-      onUpdateProfile({ ...profile, notifications: initialPrefs });
+      setPrefs(nextPrefs);
+      onUpdateProfile({ ...profile, notifications: nextPrefs });
     } catch (error: any) {
       console.error('Subscription failed', error);
 
       if (error?.message === 'NOTIFICATION_UNSUPPORTED') {
-        alert('මෙම උපාංගයේ හෝ බ්‍රව්සරයේ notifications සක්‍රීය කළ නොහැක. කරුණාකර supported browser එකකින් නැවත උත්සාහ කරන්න.');
+        alert('This browser does not support push notifications.');
       } else if (error?.message === 'PERMISSION_DENIED' || error?.name === 'NotAllowedError') {
-        alert('නිවේදන සක්‍රීය කිරීමට browser අවසර අවශ්‍යයි. කරුණාකර අවසර ලබා දී නැවත උත්සාහ කරන්න.');
+        alert('Browser permission is needed to turn notifications on.');
       } else {
-        alert('නිවේදන සක්‍රීය කිරීම අසාර්ථක විය. කරුණාකර ටික වේලාවකින් නැවත උත්සාහ කරන්න.');
+        alert('Notification setup failed. Please try again.');
       }
     } finally {
       setLoading(false);
     }
   };
 
-  const handleTestNotification = async () => {
-    const userId = localStorage.getItem('wishwaya_user_id');
-    if (!userId || !isSubscribed) return;
-
-    setLoading(true);
-    try {
-      await fetch('/api/notify/send', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          userId,
-          title: 'පරීක්ෂණ නිවේදනය ✅',
-          body: 'Wishwaya නිවේදන පද්ධතිය සාර්ථකව ක්‍රියාත්මක වේ.',
-          url: '/profile'
-        })
-      });
-    } catch (error) {
-      console.error('Failed to send test notification', error);
-    } finally {
-      setLoading(false);
+  const handleToggle = async () => {
+    if (!supportsNotifications) {
+      alert('This browser does not support push notifications.');
+      return;
     }
-  };
 
-  const togglePref = (key: keyof typeof prefs) => {
-    if (key === 'enabled') return;
-    void updatePrefs({ ...prefs, [key]: !prefs[key] });
-  };
+    if (!isSubscribed || permission !== 'granted') {
+      setShowPermissionModal(true);
+      return;
+    }
 
-  const permissionStatus = !supportsNotifications
-    ? 'Notifications Not Supported'
-    : window.Notification.permission === 'granted'
-      ? 'Permission Granted ✅'
-      : 'Permission Required ⚠️';
+    await updatePrefs({ ...prefs, enabled: !prefs.enabled });
+  };
 
   return (
-    <div className="space-y-6">
-      <div className="bg-white p-6 rounded-[2.5rem] zen-shadow border border-gray-50">
-        <div className="flex items-center justify-between mb-6">
-          <div className="flex items-center space-x-3">
-            <div className="w-10 h-10 bg-purple-50 rounded-2xl flex items-center justify-center text-xl">🔔</div>
-            <div>
-              <h3 className="sinhala font-black text-gray-800 text-sm">නිවේදන සැකසුම්</h3>
-              <p className="text-[9px] text-gray-400 font-bold uppercase tracking-wider">Notification Settings</p>
-            </div>
-          </div>
-          <button
-            onClick={handleToggleMaster}
-            disabled={loading}
-            className={`w-12 h-6 rounded-full transition-all relative ${prefs.enabled && isSubscribed ? 'bg-green-500' : 'bg-gray-200'}`}
-          >
-            <div className={`absolute top-1 w-4 h-4 bg-white rounded-full transition-all ${prefs.enabled && isSubscribed ? 'left-7' : 'left-1'}`} />
-          </button>
+    <div className="bg-white p-6 rounded-[2.5rem] zen-shadow border border-gray-50 space-y-4">
+      <div className="flex items-center justify-between gap-4">
+        <div className="min-w-0">
+          <p className="text-[9px] text-gray-400 font-bold uppercase tracking-[0.2em]">Notifications</p>
+          <h3 className="font-black text-gray-800 text-sm truncate">
+            {user?.email || 'This device'}
+          </h3>
         </div>
 
-        <div className="space-y-4">
-          <SettingItem
-            label="දිනපතා ලග්න පලාපල"
-            sublabel="Daily Horoscope"
-            active={prefs.horoscope}
-            disabled={!prefs.enabled || !isSubscribed}
-            onClick={() => togglePref('horoscope')}
-          />
-          <SettingItem
-            label="රාහු කාලය මතක් කිරීම්"
-            sublabel="Rahu Kalaya Reminder"
-            active={prefs.rahuKalaya}
-            disabled={!prefs.enabled || !isSubscribed}
-            onClick={() => togglePref('rahuKalaya')}
-          />
-          <SettingItem
-            label="විශේෂ නැකත් දැනුම්දීම්"
-            sublabel="Special Nekath Alerts"
-            active={prefs.specialNekath}
-            disabled={!prefs.enabled || !isSubscribed}
-            onClick={() => togglePref('specialNekath')}
-          />
-          <SettingItem
-            label="උපන් දින සුභපැතුම්"
-            sublabel="Birthday Wishes"
-            active={prefs.birthday}
-            disabled={!prefs.enabled || !isSubscribed}
-            onClick={() => togglePref('birthday')}
-          />
+        <div className={`px-3 py-1 rounded-full text-[9px] font-black uppercase tracking-widest ${
+          prefs.enabled && isSubscribed && permission === 'granted'
+            ? 'bg-emerald-50 text-emerald-600'
+            : 'bg-gray-100 text-gray-500'
+        }`}>
+          {prefs.enabled && isSubscribed && permission === 'granted' ? 'On' : 'Off'}
         </div>
-
-        {isSubscribed && (
-          <div className="mt-8 pt-6 border-t border-gray-50 flex flex-col space-y-3">
-            <button
-              onClick={handleTestNotification}
-              disabled={loading}
-              className="w-full py-4 rounded-2xl bg-gray-50 text-gray-500 font-bold text-[10px] uppercase tracking-widest hover:bg-gray-100 transition-all flex items-center justify-center space-x-2"
-            >
-              <span>Test Notification</span>
-              <span>🚀</span>
-            </button>
-            <p className="text-[9px] text-center text-gray-400 font-medium">
-              Status: {permissionStatus}
-            </p>
-          </div>
-        )}
       </div>
+
+      <div className="flex items-center justify-between rounded-[2rem] border border-gray-100 bg-gray-50/70 px-4 py-4">
+        <div className="min-w-0 pr-4">
+          <p className="text-xs font-black text-gray-800">Push notifications</p>
+          <p className="text-[11px] text-gray-500 leading-relaxed mt-1">{statusText}</p>
+        </div>
+
+        <button
+          onClick={handleToggle}
+          disabled={loading}
+          className={`w-12 h-6 rounded-full transition-all relative flex-shrink-0 ${
+            prefs.enabled && isSubscribed && permission === 'granted' ? 'bg-emerald-500' : 'bg-gray-300'
+          }`}
+        >
+          <div
+            className={`absolute top-1 w-4 h-4 bg-white rounded-full transition-all ${
+              prefs.enabled && isSubscribed && permission === 'granted' ? 'left-7' : 'left-1'
+            }`}
+          />
+        </button>
+      </div>
+
+      {!supportsNotifications && (
+        <p className="text-[10px] text-amber-600 font-semibold">
+          Use a supported browser like Chrome or Edge to receive notifications.
+        </p>
+      )}
 
       {showPermissionModal && (
         <div className="fixed inset-0 z-[200] flex items-center justify-center p-6 bg-black/40 backdrop-blur-sm animate-in fade-in duration-300">
           <div className="bg-white w-full max-w-sm rounded-[3rem] p-8 zen-shadow space-y-6 animate-in zoom-in-95 duration-300">
-            <div className="w-20 h-20 bg-purple-50 rounded-[2rem] mx-auto flex items-center justify-center text-4xl">🔔</div>
+            <div className="w-20 h-20 bg-emerald-50 rounded-[2rem] mx-auto flex items-center justify-center text-3xl font-black text-emerald-700">
+              Bell
+            </div>
+
             <div className="text-center space-y-2">
-              <h3 className="sinhala font-black text-xl text-gray-800">නිවේදන සක්‍රීය කරන්න</h3>
-              <p className="sinhala text-sm text-gray-500 leading-relaxed">
-                Wishwaya මගින් ඔබට දිනපතා ලග්න පලාපල, රාහු කාලය, විශේෂ නැකත් සහ උපන් දින සුභපැතුම් ලැබිය හැක.
-                නියමිත වෙලාවට මතක් කිරීම් ලබා ගැනීමට notifications සක්‍රීය කරන්න.
+              <h3 className="font-black text-xl text-gray-800">Enable notifications</h3>
+              <p className="text-sm text-gray-500 leading-relaxed">
+                Turn on push notifications to receive horoscope updates and reminders on this device.
               </p>
             </div>
+
             <div className="space-y-3">
               <button
                 onClick={requestPermissionAndSubscribe}
-                className="w-full py-5 rounded-2xl bg-gradient-to-r from-purple-600 to-indigo-600 text-white font-bold text-sm sinhala shadow-lg shadow-purple-200 active:scale-95 transition-all"
+                className="w-full py-5 rounded-2xl bg-gradient-to-r from-emerald-600 to-green-600 text-white font-bold text-sm shadow-lg shadow-emerald-200 active:scale-95 transition-all"
               >
-                සක්‍රීය කරන්න
+                Turn on notifications
               </button>
               <button
                 onClick={() => setShowPermissionModal(false)}
-                className="w-full py-5 rounded-2xl bg-gray-50 text-gray-400 font-bold text-sm sinhala hover:bg-gray-100 transition-all"
+                className="w-full py-5 rounded-2xl bg-gray-50 text-gray-400 font-bold text-sm hover:bg-gray-100 transition-all"
               >
-                පසුව
+                Not now
               </button>
             </div>
           </div>
@@ -307,26 +286,5 @@ const NotificationSettings: React.FC<NotificationSettingsProps> = ({ profile, on
     </div>
   );
 };
-
-const SettingItem: React.FC<{
-  label: string;
-  sublabel: string;
-  active: boolean;
-  disabled: boolean;
-  onClick: () => void;
-}> = ({ label, sublabel, active, disabled, onClick }) => (
-  <div
-    onClick={disabled ? undefined : onClick}
-    className={`flex items-center justify-between p-4 rounded-2xl border transition-all cursor-pointer ${disabled ? 'opacity-40 grayscale pointer-events-none' : ''} ${active ? 'bg-purple-50/30 border-purple-100' : 'bg-white border-gray-50'}`}
-  >
-    <div>
-      <p className="sinhala font-bold text-gray-700 text-xs">{label}</p>
-      <p className="text-[9px] text-gray-400 font-bold uppercase tracking-wider">{sublabel}</p>
-    </div>
-    <div className={`w-10 h-5 rounded-full relative transition-all ${active ? 'bg-purple-500' : 'bg-gray-200'}`}>
-      <div className={`absolute top-1 w-3 h-3 bg-white rounded-full transition-all ${active ? 'left-6' : 'left-1'}`} />
-    </div>
-  </div>
-);
 
 export default NotificationSettings;
