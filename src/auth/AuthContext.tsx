@@ -5,7 +5,12 @@ import {
   signInWithPopup,
   signOut,
 } from 'firebase/auth';
-import { firebaseAuth, googleProvider, isFirebaseConfigured } from '../firebase-config';
+import {
+  firebaseAuth,
+  googleProvider,
+  initializeFirebaseConfig,
+  isFirebaseConfigured,
+} from '../firebase-config';
 
 interface AuthContextValue {
   user: User | null;
@@ -26,23 +31,40 @@ const AuthContext = createContext<AuthContextValue>({
 export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const [user, setUser] = useState<User | null>(null);
   const [loading, setLoading] = useState(true);
+  const [authEnabled, setAuthEnabled] = useState(false);
 
   useEffect(() => {
-    if (!firebaseAuth || !isFirebaseConfigured) {
-      setLoading(false);
-      return;
-    }
+    let unsubscribe: (() => void) | undefined;
+    let isCancelled = false;
 
-    const unsubscribe = onAuthStateChanged(firebaseAuth, (nextUser) => {
-      setUser(nextUser);
-      setLoading(false);
-    });
+    const init = async () => {
+      const configured = await initializeFirebaseConfig();
+      if (isCancelled) return;
 
-    return unsubscribe;
+      setAuthEnabled(configured);
+
+      if (!configured || !firebaseAuth) {
+        setLoading(false);
+        return;
+      }
+
+      unsubscribe = onAuthStateChanged(firebaseAuth, (nextUser) => {
+        setUser(nextUser);
+        setLoading(false);
+      });
+    };
+
+    void init();
+
+    return () => {
+      isCancelled = true;
+      unsubscribe?.();
+    };
   }, []);
 
   const signInWithGoogle = async () => {
-    if (!firebaseAuth || !googleProvider || !isFirebaseConfigured) {
+    const configured = await initializeFirebaseConfig();
+    if (!configured || !firebaseAuth || !googleProvider || !isFirebaseConfigured()) {
       throw new Error('FIREBASE_NOT_CONFIGURED');
     }
 
@@ -59,7 +81,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   };
 
   const logout = async () => {
-    if (!firebaseAuth || !isFirebaseConfigured) return;
+    if (!firebaseAuth || !isFirebaseConfigured()) return;
     await signOut(firebaseAuth);
   };
 
@@ -68,7 +90,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       value={{
         user,
         loading,
-        authEnabled: isFirebaseConfigured,
+        authEnabled,
         signInWithGoogle,
         logout,
       }}
