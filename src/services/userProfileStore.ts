@@ -10,6 +10,7 @@ const PROFILE_FIELDS: Array<keyof UserProfile> = [
   'dob',
   'birthTime',
   'city',
+  'languagePreference',
   'rashi',
   'lagna',
   'mismatchNotice',
