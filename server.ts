@@ -6,6 +6,7 @@ import { GoogleGenAI } from "@google/genai";
 import { fileURLToPath } from 'url';
 import { loadEnv } from 'vite';
 import { nekathDatabase } from './src/data/nekathData.ts';
+import { PremiumAstroReportEngine } from './services/premiumAstroReportEngine.ts';
 
 // Fallback for nekathDatabase if import fails or is empty
 const safeNekathDatabase = nekathDatabase || {};
@@ -29,6 +30,39 @@ for (const [key, value] of Object.entries(appEnv)) {
 
 const app = express();
 const PORT = Number(process.env.PORT) || 3000;
+const STRIPE_SECRET_KEY = process.env.STRIPE_SECRET_KEY || '';
+const STRIPE_PRICE_WISHWAYA_PRO = process.env.STRIPE_PRICE_WISHWAYA_PRO || '';
+const APP_URL = (process.env.APP_URL || 'http://localhost:3000')
+  .replace(/"+$/, '')
+  .replace(/\/+$/, '');
+
+const createStripeCheckoutSession = async (customerEmail?: string | null) => {
+  const body = new URLSearchParams();
+  body.set('mode', 'payment');
+  body.set('line_items[0][price]', STRIPE_PRICE_WISHWAYA_PRO);
+  body.set('line_items[0][quantity]', '1');
+  body.set('success_url', `${APP_URL}/payment-success`);
+  body.set('cancel_url', `${APP_URL}/payment-cancel`);
+  if (customerEmail) {
+    body.set('customer_email', customerEmail);
+  }
+
+  const response = await fetch('https://api.stripe.com/v1/checkout/sessions', {
+    method: 'POST',
+    headers: {
+      Authorization: `Bearer ${STRIPE_SECRET_KEY}`,
+      'Content-Type': 'application/x-www-form-urlencoded',
+    },
+    body,
+  });
+
+  const data = await response.json();
+  if (!response.ok) {
+    throw new Error(data?.error?.message || 'Failed to create Stripe checkout session');
+  }
+
+  return data;
+};
 
 // Global Error Handlers
 process.on('uncaughtException', (err) => {
@@ -66,6 +100,7 @@ if (!fs.existsSync(DATA_DIR)) {
 
 const SUBSCRIPTIONS_FILE = path.join(DATA_DIR, 'subscriptions.json');
 const VAPID_KEYS_FILE = path.join(DATA_DIR, 'vapid.json');
+const premiumAstroReportEngine = new PremiumAstroReportEngine(DATA_DIR);
 
 const migrateLegacyRuntimeFile = (fileName: string) => {
   const currentPath = path.join(DATA_DIR, fileName);
@@ -497,6 +532,217 @@ app.post('/api/notify/send', async (req, res) => {
     failedCount,
     removedCount,
   });
+});
+
+app.post('/api/create-checkout-session', async (req, res) => {
+  try {
+    if (!STRIPE_SECRET_KEY || !STRIPE_PRICE_WISHWAYA_PRO) {
+      return res.status(500).json({ error: 'Stripe environment variables are missing' });
+    }
+
+    const customerEmail =
+      typeof req.body?.customerEmail === 'string' && req.body.customerEmail.trim()
+        ? req.body.customerEmail.trim()
+        : null;
+
+    const session = await createStripeCheckoutSession(customerEmail);
+    res.status(201).json({
+      checkoutUrl: session.url || null,
+      sessionId: session.id || null,
+    });
+  } catch (error: any) {
+    console.error('[stripe] create checkout session failed', error);
+    res.status(500).json({ error: error?.message || 'Failed to create checkout session' });
+  }
+});
+
+app.post('/api/astro-reports/payment-success-create', (req, res) => {
+  try {
+    const { userId, profile } = req.body || {};
+    if (!userId) {
+      return res.status(400).json({ error: 'userId is required' });
+    }
+
+    const result = premiumAstroReportEngine.createBackgroundReportFromProfile(userId, profile || null);
+    res.status(201).json(result);
+  } catch (error: any) {
+    console.error('[astro-report] payment success create failed', error);
+    res.status(500).json({ error: error?.message || 'Failed to create report request after payment' });
+  }
+});
+
+app.post('/api/astro-reports/:reportId/requirements', (req, res) => {
+  try {
+    const { userId, profile } = req.body || {};
+    if (!userId) {
+      return res.status(400).json({ error: 'userId is required' });
+    }
+
+    const requirements = premiumAstroReportEngine.getRequirements(req.params.reportId, userId, profile || null);
+    res.json(requirements);
+  } catch (error: any) {
+    console.error('[astro-report] requirements failed', error);
+    res.status(400).json({ error: error?.message || 'Failed to load requirements' });
+  }
+});
+
+app.post('/api/astro-reports/:reportId/inputs', (req, res) => {
+  try {
+    const result = premiumAstroReportEngine.submitInputs(req.params.reportId, req.body);
+    res.status(202).json(result);
+  } catch (error: any) {
+    console.error('[astro-report] input submission failed', error);
+    res.status(400).json({ error: error?.message || 'Failed to submit inputs' });
+  }
+});
+
+app.get('/api/astro-reports', (req, res) => {
+  try {
+    const userId = req.query.userId as string;
+    if (!userId) {
+      return res.status(400).json({ error: 'userId is required' });
+    }
+
+    res.json(premiumAstroReportEngine.listReports(userId));
+  } catch (error: any) {
+    console.error('[astro-report] list reports failed', error);
+    res.status(500).json({ error: error?.message || 'Failed to list reports' });
+  }
+});
+
+app.get('/api/astro-reports/:reportId', (req, res) => {
+  try {
+    const userId = req.query.userId as string;
+    if (!userId) {
+      return res.status(400).json({ error: 'userId is required' });
+    }
+
+    res.json(premiumAstroReportEngine.getReport(req.params.reportId, userId));
+  } catch (error: any) {
+    console.error('[astro-report] get report failed', error);
+    res.status(404).json({ error: error?.message || 'Report not found' });
+  }
+});
+
+app.get('/api/astro-reports/:reportId/palm-image', (req, res) => {
+  try {
+    const userId = req.query.userId as string;
+    if (!userId) {
+      return res.status(400).json({ error: 'userId is required' });
+    }
+
+    const filePath = premiumAstroReportEngine.getPalmImageFile(req.params.reportId, userId);
+    if (!filePath) {
+      return res.status(404).json({ error: 'Palm image not found' });
+    }
+
+    res.sendFile(filePath);
+  } catch (error: any) {
+    console.error('[astro-report] palm image access failed', error);
+    res.status(404).json({ error: error?.message || 'Palm image not found' });
+  }
+});
+
+app.get('/api/astro-reports/:reportId/pdf', (req, res) => {
+  try {
+    const userId = req.query.userId as string;
+    if (!userId) {
+      return res.status(400).send('userId is required');
+    }
+
+    const report = premiumAstroReportEngine.getReport(req.params.reportId, userId);
+    if (!report.reportJson) {
+      return res.status(404).send('Report PDF source is not ready');
+    }
+
+    const sections = [
+      report.reportJson.coverSection,
+      report.reportJson.coreAstroProfile,
+      report.reportJson.personalityLifeBlueprint,
+      report.reportJson.wealthCareerBusinessReport,
+      report.reportJson.loveMarriageRelationshipReport,
+      report.reportJson.healthLifestyleGuidance,
+      report.reportJson.dashaTimePeriodAnalysis,
+      report.reportJson.yogasDoshasPlanetaryInfluences,
+      report.reportJson.palmAnalysisReport,
+      report.reportJson.upcomingNekathForUser,
+      report.reportJson.pastLifeLine,
+      report.reportJson.recommendedGemsToWear,
+      report.reportJson.fullRemediesReport,
+      report.reportJson.personalizedRecommendations,
+      report.reportJson.finalThoughtSummary,
+      report.reportJson.endRecommendationsSection,
+    ];
+
+    const sectionHtml = sections
+      .map(
+        (section) => `
+          <section class="section">
+            <h2>${section.title}</h2>
+            ${section.content
+              .split('\n')
+              .filter(Boolean)
+              .map((line) => `<p>${line}</p>`)
+              .join('')}
+          </section>
+        `
+      )
+      .join('');
+
+    res.setHeader('Content-Type', 'text/html; charset=utf-8');
+    res.send(`
+      <!doctype html>
+      <html lang="si">
+        <head>
+          <meta charset="utf-8" />
+          <title>Wishwaya Premium Astrology Report</title>
+          <style>
+            body { font-family: "Nirmala UI", "Segoe UI", sans-serif; margin: 0; background: #0f0d08; color: #f7edd2; }
+            .page { max-width: 860px; margin: 0 auto; padding: 32px 20px 80px; }
+            .cover { padding: 36px; border-radius: 28px; background: radial-gradient(circle at top, rgba(255,205,92,0.28), transparent 35%), linear-gradient(135deg, #1b1610, #111827); border: 1px solid rgba(255,220,128,0.22); box-shadow: 0 18px 60px rgba(0,0,0,0.32); }
+            .badge { display: inline-block; padding: 8px 14px; border-radius: 999px; background: rgba(255,215,130,0.14); color: #f8df97; font-size: 12px; margin-right: 8px; }
+            h1, h2 { color: #ffe7a3; }
+            h1 { margin-bottom: 8px; }
+            .section { margin-top: 22px; padding: 22px; background: rgba(255,255,255,0.04); border-radius: 22px; border: 1px solid rgba(255,255,255,0.08); }
+            p { line-height: 1.85; color: #f7f0dc; }
+            .footer { text-align: center; margin-top: 28px; color: #c9b68b; font-size: 12px; }
+            @media print {
+              body { background: white; color: #1f2937; }
+              .cover, .section { box-shadow: none; background: white; color: #1f2937; border: 1px solid #e5e7eb; }
+              h1, h2, p, .badge, .footer { color: #1f2937; }
+            }
+          </style>
+        </head>
+        <body>
+          <div class="page">
+            <div class="cover">
+              <span class="badge">Wishwaya</span>
+              <span class="badge">Sinhala Premium Report</span>
+              <h1>${report.inputSnapshot?.fullName || 'Premium Astrology Report'}</h1>
+              <p>මෙය Wishwaya විසින් සකස් කළ premium Sinhala astrology report එකකි. අවශ්‍ය නම් browser print dialog භාවිතයෙන් PDF ලෙස සුරකින්න.</p>
+            </div>
+            ${sectionHtml}
+            <div class="footer">Wishwaya • Generated ${new Date(report.updatedAt).toLocaleDateString('si-LK')}</div>
+          </div>
+          <script>window.__WISHWAYA_REPORT_READY__ = true;</script>
+        </body>
+      </html>
+    `);
+  } catch (error: any) {
+    console.error('[astro-report] pdf source failed', error);
+    res.status(404).send(error?.message || 'Report not found');
+  }
+});
+
+app.post('/api/astro-reports/:reportId/retry', (req, res) => {
+  try {
+    const { adminKey } = req.body || {};
+    const result = premiumAstroReportEngine.retryReport(req.params.reportId, adminKey);
+    res.json(result);
+  } catch (error: any) {
+    console.error('[astro-report] retry failed', error);
+    res.status(403).json({ error: error?.message || 'Retry failed' });
+  }
 });
 
 

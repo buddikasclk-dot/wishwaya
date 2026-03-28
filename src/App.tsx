@@ -1,4 +1,4 @@
-import React, { useState, useEffect, createContext, useContext } from 'react';
+import React, { useState, useEffect, useRef, createContext, useContext } from 'react';
 import Onboarding from '../components/Onboarding';
 import Dashboard from '../components/Dashboard';
 import Matching from '../components/Matching';
@@ -19,9 +19,15 @@ import Navigation from '../components/Navigation';
 import GlobalLoader from '../components/GlobalLoader';
 import NotificationSettings from '../components/NotificationSettings';
 import ProfileEditor from '../components/ProfileEditor';
+import PremiumAstroReports from '../components/PremiumAstroReports';
 import { useAuth } from './auth/AuthContext';
-import { migrateUserIdToFirebase } from './auth/userIdentity';
+import { getEffectiveUserId, migrateUserIdToFirebase } from './auth/userIdentity';
 import { getUserProfile, saveUserProfile } from './services/userProfileStore';
+import {
+  createReportAfterPaymentSuccess,
+  fetchAstroReportRequirements,
+  submitAstroReportInputs,
+} from './services/astroReportClient';
 import { calculateBirthProfile, calculateAstrologyDetails } from './services/astrology-calculator';
 import { calculateRashiFromDetails } from './services/geminiService';
 import { UserProfile, PalmAnalysisState, VastuAnalysisState, MatchingState, OmenAnalysisState, BabyNamingState } from './types';
@@ -153,11 +159,473 @@ const isMasterBirthProfile = (profile: Pick<UserProfile, 'dob' | 'birthTime' | '
   (profile.birthTime || '').slice(0, 5) === '14:03' &&
   MASTER_PROFILE_CITY_ALIASES.includes((profile.city || '').trim().toLowerCase());
 
+const PaymentSuccessPage: React.FC<{ userId: string }> = ({ userId }) => {
+  const [stage, setStage] = useState<'booting' | 'form' | 'submitted' | 'error'>('booting');
+  const [message, setMessage] = useState('Preparing your premium report request...');
+  const [reportId, setReportId] = useState<string | null>(null);
+  const [requestId, setRequestId] = useState<string | null>(null);
+  const [submitting, setSubmitting] = useState(false);
+  const [cameraOpen, setCameraOpen] = useState(false);
+  const [cameraError, setCameraError] = useState<string | null>(null);
+  const [generalError, setGeneralError] = useState<string | null>(null);
+  const [capturedImage, setCapturedImage] = useState<string | null>(null);
+  const [palmQuality, setPalmQuality] = useState<{
+    width: number;
+    height: number;
+    brightness: number;
+    contrast: number;
+    sharpness: number;
+  } | null>(null);
+  const [formData, setFormData] = useState({
+    fullName: '',
+    dateOfBirth: '',
+    timeOfBirth: '',
+    birthPlace: '',
+    gender: 'male' as UserProfile['gender'],
+    preferredLanguage: 'si' as const,
+  });
+
+  const videoRef = useRef<HTMLVideoElement>(null);
+  const canvasRef = useRef<HTMLCanvasElement>(null);
+
+  const preferredHandLabel = formData.gender === 'female' ? 'Left Hand' : 'Right Hand';
+  const preferredHandSinhala = formData.gender === 'female' ? 'වම් අත' : 'දකුණු අත';
+
+  const stopCamera = () => {
+    const stream = videoRef.current?.srcObject as MediaStream | null;
+    stream?.getTracks().forEach((track) => track.stop());
+    if (videoRef.current) {
+      videoRef.current.srcObject = null;
+    }
+    setCameraOpen(false);
+  };
+
+  const analyzePalmQuality = (canvas: HTMLCanvasElement) => {
+    const context = canvas.getContext('2d');
+    if (!context) {
+      return {
+        width: canvas.width,
+        height: canvas.height,
+        brightness: 0,
+        contrast: 0,
+        sharpness: 0,
+      };
+    }
+
+    const { data, width, height } = context.getImageData(0, 0, canvas.width, canvas.height);
+    let brightnessTotal = 0;
+    const luminanceValues: number[] = [];
+
+    for (let index = 0; index < data.length; index += 4) {
+      const luminance = 0.299 * data[index] + 0.587 * data[index + 1] + 0.114 * data[index + 2];
+      brightnessTotal += luminance;
+      luminanceValues.push(luminance);
+    }
+
+    const mean = brightnessTotal / luminanceValues.length;
+    let variance = 0;
+    let edgeTotal = 0;
+
+    for (let y = 0; y < height - 1; y += 1) {
+      for (let x = 0; x < width - 1; x += 1) {
+        const index = y * width + x;
+        const here = luminanceValues[index];
+        const right = luminanceValues[index + 1];
+        const below = luminanceValues[index + width];
+        variance += (here - mean) ** 2;
+        edgeTotal += Math.abs(here - right) + Math.abs(here - below);
+      }
+    }
+
+    const contrast = Math.min(100, Math.round((Math.sqrt(variance / luminanceValues.length) / 128) * 100));
+    const sharpness = Math.min(100, Math.round((edgeTotal / ((width - 1) * (height - 1) * 2 * 255)) * 100));
+
+    return {
+      width,
+      height,
+      brightness: Math.round((mean / 255) * 100),
+      contrast,
+      sharpness,
+    };
+  };
+
+  const startCamera = async () => {
+    setCameraError(null);
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({
+        video: { facingMode: 'environment' },
+        audio: false,
+      });
+      if (videoRef.current) {
+        videoRef.current.srcObject = stream;
+      }
+      setCameraOpen(true);
+    } catch (error) {
+      console.error('Palm capture camera failed', error);
+      setCameraError('Camera access could not be started. Please allow camera permission and try again.');
+    }
+  };
+
+  const capturePalm = () => {
+    if (!videoRef.current || !canvasRef.current) return;
+    const context = canvasRef.current.getContext('2d');
+    if (!context) return;
+
+    canvasRef.current.width = videoRef.current.videoWidth;
+    canvasRef.current.height = videoRef.current.videoHeight;
+    context.drawImage(videoRef.current, 0, 0, canvasRef.current.width, canvasRef.current.height);
+
+    const imageDataUrl = canvasRef.current.toDataURL('image/jpeg', 0.9);
+    const quality = analyzePalmQuality(canvasRef.current);
+
+    if (quality.width < 600 || quality.height < 800) {
+      setCameraError('Palm image resolution is too small. Please move closer and capture again.');
+      return;
+    }
+    if (quality.brightness < 45) {
+      setCameraError('Palm image is too dark. Please capture again with better lighting.');
+      return;
+    }
+    if (quality.contrast < 18) {
+      setCameraError('Palm image contrast is too low. Please keep the full palm clearly visible.');
+      return;
+    }
+    if (quality.sharpness < 12) {
+      setCameraError('Palm image looks blurry. Please hold steady and capture again.');
+      return;
+    }
+
+    setCapturedImage(imageDataUrl);
+    setPalmQuality(quality);
+    stopCamera();
+  };
+
+  useEffect(() => {
+    let cancelled = false;
+
+    const prepareReport = async () => {
+      try {
+        const savedProfile = localStorage.getItem(LOCAL_PROFILE_KEY);
+        const parsedProfile = savedProfile ? (JSON.parse(savedProfile) as UserProfile) : null;
+        const existingReportId =
+          typeof window !== 'undefined'
+            ? new URLSearchParams(window.location.search).get('reportId')
+            : null;
+        const report = existingReportId
+          ? { id: existingReportId }
+          : (await createReportAfterPaymentSuccess(userId, parsedProfile)).report;
+        const requirements = await fetchAstroReportRequirements(report.id, userId, parsedProfile);
+
+        if (cancelled) return;
+
+        setReportId(requirements.reportId);
+        setRequestId(requirements.requestId);
+        setFormData({
+          fullName: requirements.prefilled.fullName || '',
+          dateOfBirth: requirements.prefilled.dateOfBirth || '',
+          timeOfBirth: requirements.prefilled.timeOfBirth || '',
+          birthPlace: requirements.prefilled.birthPlace || '',
+          gender: (requirements.prefilled.gender || 'male') as UserProfile['gender'],
+          preferredLanguage: 'si',
+        });
+
+        if (requirements.prefilled.palmImageUrl) {
+          setCapturedImage(requirements.prefilled.palmImageUrl);
+        }
+
+        if (['queued', 'generating', 'pdf_generating', 'completed'].includes(requirements.status)) {
+          setStage('submitted');
+          setMessage('Your premium report is already being prepared in the background.');
+          return;
+        }
+
+        setStage('form');
+        setMessage('Payment confirmed. Please complete the final details and capture your palm to start report generation.');
+      } catch (error) {
+        console.error('Failed to prepare premium report after payment success', error);
+        if (cancelled) return;
+        setStage('error');
+        setGeneralError('Payment was successful, but the premium input step could not be opened.');
+      }
+    };
+
+    void prepareReport();
+
+    return () => {
+      cancelled = true;
+      stopCamera();
+    };
+  }, [userId]);
+
+  useEffect(() => {
+    if (stage !== 'form' || capturedImage || cameraOpen) return;
+    if (!navigator.mediaDevices?.getUserMedia) return;
+    void startCamera();
+  }, [stage, capturedImage, cameraOpen]);
+
+  const updateProfileCache = () => {
+    const savedProfile = localStorage.getItem(LOCAL_PROFILE_KEY);
+    const currentProfile = savedProfile ? (JSON.parse(savedProfile) as UserProfile) : ({} as UserProfile);
+    const nextProfile = enrichProfileAstrology({
+      ...currentProfile,
+      name: formData.fullName,
+      gender: formData.gender,
+      dob: formData.dateOfBirth,
+      birthTime: formData.timeOfBirth,
+      city: formData.birthPlace,
+    } as UserProfile);
+    localStorage.setItem(LOCAL_PROFILE_KEY, JSON.stringify(nextProfile));
+  };
+
+  const handleSubmit = async () => {
+    if (!reportId) return;
+    if (!capturedImage || !palmQuality) {
+      setGeneralError('Please capture a clear palm photo before submitting.');
+      return;
+    }
+
+    setSubmitting(true);
+    setGeneralError(null);
+
+    try {
+      updateProfileCache();
+      await submitAstroReportInputs(reportId, {
+        userId,
+        profile: null,
+        fullName: formData.fullName,
+        dateOfBirth: formData.dateOfBirth,
+        timeOfBirth: formData.timeOfBirth,
+        birthPlace: formData.birthPlace,
+        gender: formData.gender,
+        preferredLanguage: 'si',
+        palmImageBase64: capturedImage,
+        palmImageMimeType: 'image/jpeg',
+        palmQuality,
+      });
+      setStage('submitted');
+      setMessage('Your premium report request has been submitted. Wishwaya is now generating the full Sinhala report in the background.');
+    } catch (error: any) {
+      console.error('Failed to submit premium inputs', error);
+      setGeneralError(error?.message || 'Premium report submission failed.');
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  return (
+    <div className="min-h-screen bg-[radial-gradient(circle_at_top,_rgba(74,222,128,0.18),_transparent_38%),linear-gradient(180deg,_#f6fff7_0%,_#eefbf2_48%,_#F9FBFA_100%)] px-4 py-8">
+      <div className="mx-auto max-w-2xl rounded-[2.5rem] border border-emerald-100 bg-white/90 p-6 shadow-xl md:p-10">
+        <div className="text-center">
+          <div className="mx-auto flex h-20 w-20 items-center justify-center rounded-full bg-emerald-100 text-4xl">✓</div>
+          <h1 className="mt-6 text-3xl font-black text-slate-900">Payment Success</h1>
+          <p className="mt-4 text-sm leading-7 text-slate-600">{message}</p>
+          {requestId && (
+            <div className="mt-4 inline-flex rounded-full bg-slate-100 px-4 py-2 text-xs font-black text-slate-600">
+              Request ID {requestId}
+            </div>
+          )}
+        </div>
+
+        {stage === 'booting' && (
+          <div className="mt-8 rounded-[2rem] bg-slate-50 p-6 text-center text-sm font-semibold text-slate-600">
+            Loading your premium request details...
+          </div>
+        )}
+
+        {stage === 'error' && (
+          <div className="mt-8 space-y-5">
+            <div className="rounded-[2rem] border border-red-200 bg-red-50 p-5 text-sm leading-7 text-red-600">
+              {generalError}
+            </div>
+            <button
+              type="button"
+              onClick={() => {
+                window.location.href = '/?tab=profile';
+              }}
+              className="w-full rounded-full bg-slate-900 px-6 py-4 text-sm font-black text-white"
+            >
+              Go back to profile
+            </button>
+          </div>
+        )}
+
+        {stage === 'form' && (
+          <div className="mt-8 space-y-6">
+            <div className="rounded-[2rem] border border-emerald-100 bg-emerald-50/60 p-5">
+              <p className="text-xs font-black uppercase tracking-[0.24em] text-emerald-700">Final Details</p>
+              <p className="mt-3 sinhala text-sm leading-7 text-slate-700">
+                පෙර සුරකින ලද උපන් තොරතුරු ස්වයංක්‍රීයව පුරවා ඇත. අඩු දේ තිබේ නම් පුරවන්න, ඉන්පසු {preferredHandSinhala} ({preferredHandLabel}) පැහැදිලිව capture කරන්න.
+              </p>
+            </div>
+
+            <div className="grid gap-4 md:grid-cols-2">
+              <label className="space-y-2">
+                <span className="text-sm font-bold text-slate-700">Full name</span>
+                <input
+                  value={formData.fullName}
+                  onChange={(event) => setFormData((current) => ({ ...current, fullName: event.target.value }))}
+                  className="w-full rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm text-slate-800 outline-none focus:border-emerald-400"
+                />
+              </label>
+              <label className="space-y-2">
+                <span className="text-sm font-bold text-slate-700">Gender</span>
+                <select
+                  value={formData.gender}
+                  onChange={(event) => setFormData((current) => ({ ...current, gender: event.target.value as UserProfile['gender'] }))}
+                  className="w-full rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm text-slate-800 outline-none focus:border-emerald-400"
+                >
+                  <option value="male">Male</option>
+                  <option value="female">Female</option>
+                </select>
+              </label>
+              <label className="space-y-2">
+                <span className="text-sm font-bold text-slate-700">Date of birth</span>
+                <input
+                  type="date"
+                  value={formData.dateOfBirth}
+                  onChange={(event) => setFormData((current) => ({ ...current, dateOfBirth: event.target.value }))}
+                  className="w-full rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm text-slate-800 outline-none focus:border-emerald-400"
+                />
+              </label>
+              <label className="space-y-2">
+                <span className="text-sm font-bold text-slate-700">Exact birth time</span>
+                <input
+                  type="time"
+                  value={formData.timeOfBirth}
+                  onChange={(event) => setFormData((current) => ({ ...current, timeOfBirth: event.target.value }))}
+                  className="w-full rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm text-slate-800 outline-none focus:border-emerald-400"
+                />
+              </label>
+            </div>
+
+            <label className="block space-y-2">
+              <span className="text-sm font-bold text-slate-700">Birth place</span>
+              <input
+                value={formData.birthPlace}
+                onChange={(event) => setFormData((current) => ({ ...current, birthPlace: event.target.value }))}
+                className="w-full rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm text-slate-800 outline-none focus:border-emerald-400"
+              />
+            </label>
+
+            <div className="rounded-[2rem] border border-sky-100 bg-sky-50/70 p-5">
+              <p className="text-sm font-black text-slate-800">Palm capture</p>
+              <p className="mt-3 text-sm leading-7 text-slate-600">
+                Use {preferredHandLabel}. Keep the full palm visible, fingers naturally open, and capture in good light.
+              </p>
+              <div className="mt-4 flex flex-wrap gap-3">
+                <span className="rounded-full bg-white px-3 py-1 text-xs font-bold text-slate-600">{formData.gender === 'female' ? 'Female: Left Hand' : 'Male: Right Hand'}</span>
+                <span className="rounded-full bg-white px-3 py-1 text-xs font-bold text-slate-600">Good lighting required</span>
+                <span className="rounded-full bg-white px-3 py-1 text-xs font-bold text-slate-600">Entire palm visible</span>
+              </div>
+              <div className="mt-5">
+                {capturedImage ? (
+                  <div className="space-y-4">
+                    <img src={capturedImage} alt="Captured palm" className="w-full rounded-[1.75rem] border border-slate-200 object-cover shadow-sm" />
+                    {palmQuality && (
+                      <div className="grid grid-cols-2 gap-3 text-xs font-semibold text-slate-600 md:grid-cols-4">
+                        <div className="rounded-2xl bg-white px-3 py-3">Brightness {palmQuality.brightness}</div>
+                        <div className="rounded-2xl bg-white px-3 py-3">Contrast {palmQuality.contrast}</div>
+                        <div className="rounded-2xl bg-white px-3 py-3">Sharpness {palmQuality.sharpness}</div>
+                        <div className="rounded-2xl bg-white px-3 py-3">{palmQuality.width}x{palmQuality.height}</div>
+                      </div>
+                    )}
+                    <button
+                      type="button"
+                      onClick={() => void startCamera()}
+                      className="rounded-full bg-slate-900 px-5 py-3 text-sm font-black text-white"
+                    >
+                      Retake Palm Photo
+                    </button>
+                  </div>
+                ) : (
+                  <button
+                    type="button"
+                    onClick={() => void startCamera()}
+                    className="rounded-full bg-slate-900 px-5 py-3 text-sm font-black text-white"
+                  >
+                    Open Camera
+                  </button>
+                )}
+              </div>
+              {cameraError && <p className="mt-4 text-sm text-red-500">{cameraError}</p>}
+            </div>
+
+            {generalError && (
+              <div className="rounded-[1.5rem] border border-red-200 bg-red-50 px-5 py-4 text-sm text-red-600">
+                {generalError}
+              </div>
+            )}
+
+            <button
+              type="button"
+              disabled={submitting}
+              onClick={() => void handleSubmit()}
+              className="w-full rounded-full bg-slate-900 px-6 py-4 text-sm font-black text-white disabled:opacity-70"
+            >
+              {submitting ? 'Submitting...' : 'Submit Premium Report Request'}
+            </button>
+          </div>
+        )}
+
+        {stage === 'submitted' && (
+          <div className="mt-8 space-y-5">
+            <div className="rounded-[2rem] border border-emerald-100 bg-emerald-50 p-5 text-sm leading-7 text-slate-700">
+              ඔබගේ සම්පූර්ණ ජෝතිශ්‍ය වාර්තාව සකස් කරමින් පවතී. පසුව profile page එකට ගොස් pending / processing / completed status එක සහ PDF download option එක බලන්න.
+            </div>
+            <button
+              type="button"
+              onClick={() => {
+                window.location.href = '/?tab=profile';
+              }}
+              className="w-full rounded-full bg-slate-900 px-6 py-4 text-sm font-black text-white"
+            >
+              Go back to profile
+            </button>
+          </div>
+        )}
+      </div>
+
+      {cameraOpen && (
+        <div className="fixed inset-0 z-[260] bg-black">
+          <video ref={videoRef} autoPlay playsInline className="h-full w-full object-cover" />
+          <div className="pointer-events-none absolute inset-0 flex items-center justify-center">
+            <div className="h-[62vh] w-[74vw] max-w-[320px] rounded-[3rem] border-2 border-white/80 shadow-[0_0_0_9999px_rgba(0,0,0,0.35)]" />
+          </div>
+          <div className="absolute left-0 right-0 top-8 px-6 text-center text-white">
+            <p className="text-lg font-black">{formData.gender === 'female' ? 'Capture Left Palm' : 'Capture Right Palm'}</p>
+            <p className="mt-2 text-sm leading-6 text-white/85">Keep the full {preferredHandLabel.toLowerCase()} visible, fingers open naturally, and use bright lighting.</p>
+          </div>
+          <div className="absolute bottom-10 left-0 right-0 flex items-center justify-center gap-6">
+            <button
+              type="button"
+              onClick={() => stopCamera()}
+              className="rounded-full bg-white/20 px-5 py-3 text-sm font-black text-white backdrop-blur"
+            >
+              Cancel
+            </button>
+            <button
+              type="button"
+              onClick={capturePalm}
+              className="flex h-20 w-20 items-center justify-center rounded-full border-4 border-white bg-white/20"
+            >
+              <span className="h-14 w-14 rounded-full bg-white" />
+            </button>
+          </div>
+          <canvas ref={canvasRef} className="hidden" />
+        </div>
+      )}
+    </div>
+  );
+};
+
 const App: React.FC = () => {
+  const currentPath = typeof window !== 'undefined' ? window.location.pathname : '/';
   const { user, loading: authLoading, authEnabled, signInWithGoogle, logout: signOutFirebase } = useAuth();
   const [profile, setProfile] = useState<UserProfile | null>(null);
   const [activeTab, setActiveTab] = useState(() => {
     if (typeof window === 'undefined') return 'dashboard';
+    const queryTab = new URLSearchParams(window.location.search).get('tab');
+    if (queryTab) return queryTab;
     return sessionStorage.getItem(ACTIVE_TAB_KEY) || 'dashboard';
   });
   const [showSplash, setShowSplash] = useState(true);
@@ -174,6 +642,34 @@ const App: React.FC = () => {
   const [profileLoading, setProfileLoading] = useState(true);
   const [profileSaveLoading, setProfileSaveLoading] = useState(false);
   const [profileSaveError, setProfileSaveError] = useState<string | null>(null);
+  const effectiveUserId = getEffectiveUserId(user?.uid);
+
+  if (currentPath === '/payment-success') {
+    return <PaymentSuccessPage userId={effectiveUserId} />;
+  }
+
+  if (currentPath === '/payment-cancel') {
+    return (
+      <div className="min-h-screen bg-[radial-gradient(circle_at_top,_rgba(96,165,250,0.16),_transparent_38%),linear-gradient(180deg,_#f8fbff_0%,_#eef6ff_48%,_#F9FBFA_100%)] px-6 py-12">
+        <div className="mx-auto max-w-xl rounded-[2.5rem] border border-sky-100 bg-white/90 p-10 text-center shadow-xl">
+          <div className="mx-auto flex h-20 w-20 items-center justify-center rounded-full bg-sky-100 text-4xl">i</div>
+          <h1 className="mt-6 text-3xl font-black text-slate-900">Payment Cancelled</h1>
+          <p className="mt-4 sinhala text-sm leading-7 text-slate-600">
+            ගෙවීම අවලංගු කර ඇත. ඔබට අවශ්‍ය නම් නැවත app එකට ගොස් premium checkout එක නැවත ආරම්භ කළ හැක.
+          </p>
+          <button
+            type="button"
+            onClick={() => {
+              window.location.href = '/?tab=profile';
+            }}
+            className="mt-8 rounded-full bg-slate-900 px-6 py-3 text-sm font-black text-white"
+          >
+            Return to profile
+          </button>
+        </div>
+      </div>
+    );
+  }
 
   useEffect(() => {
     const savedPalm = localStorage.getItem('palm_state');
@@ -292,6 +788,14 @@ const App: React.FC = () => {
   useEffect(() => {
     if (typeof window === 'undefined') return;
     sessionStorage.setItem(ACTIVE_TAB_KEY, activeTab);
+  }, [activeTab]);
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    const queryTab = new URLSearchParams(window.location.search).get('tab');
+    if (queryTab && queryTab !== activeTab) {
+      setActiveTab(queryTab);
+    }
   }, [activeTab]);
 
   const handleOnboardingComplete = async (newProfile: UserProfile) => {
@@ -460,6 +964,7 @@ const App: React.FC = () => {
     } catch (error) {
       console.error('Google sign-in failed', error);
       setAuthError('Google account linking failed. Please check Firebase setup and try again.');
+      throw error;
     } finally {
       setAuthActionLoading(false);
     }
@@ -648,6 +1153,16 @@ const App: React.FC = () => {
                   </div>
                   
                   <div className="px-8 space-y-8 pb-12">
+                    <PremiumAstroReports
+                      profile={profile}
+                      userId={effectiveUserId}
+                      userEmail={user?.email || null}
+                      authEnabled={authEnabled}
+                      authLoading={authLoading || authActionLoading}
+                      onRequireGoogleLink={handleGoogleLink}
+                      onSaveRequiredProfile={handleProfileDetailsSave}
+                    />
+
                     <div className="bg-white p-10 rounded-[4rem] zen-shadow border border-white shadow-xl text-left space-y-8 mt-[-1.5rem] relative z-20 overflow-hidden">
                       <div className="absolute top-0 right-0 p-10 text-9xl opacity-[0.02] pointer-events-none">✨</div>
                       

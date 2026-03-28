@@ -5,6 +5,7 @@ export interface UserProfile {
   dob: string;
   birthTime: string;
   city: string;
+  languagePreference?: 'si' | 'en';
   rashi?: string;
   lagna?: string;
   mismatchNotice?: string;
@@ -258,4 +259,149 @@ export interface LOAChallenge {
   badgeUnlocked: boolean;
   badgeName: string | null;
   musicEnabled: boolean;
+}
+
+export type AstroReportOrderStatus =
+  | 'pending'
+  | 'paid'
+  | 'failed'
+  | 'cancelled'
+  | 'refunded';
+
+export type AstroReportStatus =
+  | 'draft'
+  | 'awaiting_payment'
+  | 'paid'
+  | 'collecting_inputs'
+  | 'queued'
+  | 'generating'
+  | 'pdf_generating'
+  | 'completed'
+  | 'failed';
+
+export interface AstroReportOrder {
+  id: string;
+  userId: string;
+  productType: 'full_astro_report';
+  amount: number;
+  currency: string;
+  status: AstroReportOrderStatus;
+  paymentGateway: string;
+  paymentReference: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface AstroReportInputSnapshot {
+  fullName: string;
+  gender: UserProfile['gender'];
+  dateOfBirth: string;
+  timeOfBirth: string;
+  birthPlace: string;
+  preferredLanguage: 'si';
+  palmImageUrl: string;
+  palmQuality: {
+    width: number;
+    height: number;
+    brightness: number;
+    contrast: number;
+    sharpness: number;
+  };
+}
+
+export interface AstroDeterministicData {
+  lagna: string;
+  rashi: string;
+  nakshatra: string;
+  pada: string;
+  planetPositions: Array<{ planet: string; sign: string; degree: string; house: number }>;
+  housePositions: Array<{ house: number; sign: string; focus: string }>;
+  dashaSummary: {
+    currentPhase: string;
+    nextPhase: string;
+    helpfulPeriods: string[];
+    challengingPeriods: string[];
+  };
+  yogasAndDoshas: {
+    strengths: string[];
+    cautions: string[];
+    certainty: 'calculated' | 'hybrid';
+  };
+  transitSummary?: string;
+  upcomingNekathLogic?: string[];
+  recommendedGemLogic?: string[];
+  remedyBaseRules?: string[];
+  palmObservationSummary?: string[];
+  calculationNotes: string[];
+}
+
+export interface AstroReportSection {
+  key: string;
+  title: string;
+  content: string;
+}
+
+export interface AstroFullReportJson {
+  coverSection: AstroReportSection;
+  coreAstroProfile: AstroReportSection;
+  personalityLifeBlueprint: AstroReportSection;
+  wealthCareerBusinessReport: AstroReportSection;
+  loveMarriageRelationshipReport: AstroReportSection;
+  healthLifestyleGuidance: AstroReportSection;
+  dashaTimePeriodAnalysis: AstroReportSection;
+  yogasDoshasPlanetaryInfluences: AstroReportSection;
+  palmAnalysisReport: AstroReportSection;
+  upcomingNekathForUser: AstroReportSection;
+  pastLifeLine: AstroReportSection;
+  recommendedGemsToWear: AstroReportSection;
+  fullRemediesReport: AstroReportSection;
+  personalizedRecommendations: AstroReportSection;
+  finalThoughtSummary: AstroReportSection;
+  endRecommendationsSection: AstroReportSection;
+  generatedAt: string;
+  generationMode: 'gemini_hybrid' | 'deterministic_fallback';
+}
+
+export interface AstroReportRecord {
+  id: string;
+  userId: string;
+  orderId: string;
+  status: AstroReportStatus;
+  language: 'si';
+  createdAt: string;
+  updatedAt: string;
+  completedAt?: string | null;
+  birthDataJson: Partial<AstroReportInputSnapshot> | null;
+  astrologyDataJson: AstroDeterministicData | null;
+  palmImageUrl: string | null;
+  reportJson: AstroFullReportJson | null;
+  pdfUrl: string | null;
+  failureReason?: string | null;
+  inputSnapshot: AstroReportInputSnapshot | null;
+  requestId: string;
+}
+
+export interface AstroReportPurchaseBundle {
+  order: AstroReportOrder;
+  report: AstroReportRecord;
+  payment: {
+    integrationMode: 'placeholder' | 'stripe';
+    checkoutToken: string;
+    supportedStates: AstroReportOrderStatus[];
+    checkoutUrl?: string | null;
+    sessionId?: string | null;
+    stripePriceId?: string | null;
+    displayAmount?: string | null;
+    localDisplayAmount?: string | null;
+  };
+}
+
+export interface AstroReportRequirements {
+  reportId: string;
+  requestId: string;
+  status: AstroReportStatus;
+  missingFields: Array<
+    'fullName' | 'dateOfBirth' | 'timeOfBirth' | 'birthPlace' | 'gender' | 'preferredLanguage' | 'palmImage'
+  >;
+  prefilled: Partial<AstroReportInputSnapshot>;
 }
