@@ -1,6 +1,8 @@
 import React, { useState, useEffect } from 'react';
 import { LOADayContent, LOACategoryContent } from '../../types';
 
+const LOA_AUDIO_SRC = '/Positive%20Aura.mp3';
+
 interface LOADailyPageProps {
   dayContent: LOADayContent;
   category: LOACategoryContent;
@@ -25,23 +27,25 @@ const LOADailyPage: React.FC<LOADailyPageProps> = ({
   const allTasksCompleted = dayContent.tasks.length > 0 && completedTaskCount === dayContent.tasks.length;
 
   useEffect(() => {
-    // Auto-play music if enabled in settings (not implemented here, but good to have)
-    // For now, manual toggle
+    const audio = audioRef.current;
+    if (!audio) return;
+
+    void audio.play().catch(() => {
+      setIsPlaying(false);
+    });
+
     return () => {
-      if (audioRef.current) {
-        audioRef.current.pause();
-      }
+      audio.pause();
     };
-  }, []);
+  }, [dayContent.dayNumber]);
 
   const toggleAudio = () => {
     if (audioRef.current) {
       if (isPlaying) {
         audioRef.current.pause();
       } else {
-        audioRef.current.play();
+        void audioRef.current.play();
       }
-      setIsPlaying(!isPlaying);
     }
   };
 
@@ -87,8 +91,10 @@ const LOADailyPage: React.FC<LOADailyPageProps> = ({
         </button>
         <audio 
           ref={audioRef} 
-          src="https://thegreenceylon.lk/wp-content/uploads/2026/02/OM.mp3" 
+          src={LOA_AUDIO_SRC}
           loop
+          onPlay={() => setIsPlaying(true)}
+          onPause={() => setIsPlaying(false)}
         />
       </div>
 
