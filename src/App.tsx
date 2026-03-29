@@ -209,17 +209,65 @@ const PaymentSuccessPage: React.FC<{ userId: string }> = ({ userId }) => {
 
   const videoRef = useRef<HTMLVideoElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
+  const currentStreamRef = useRef<MediaStream | null>(null);
 
   const preferredHandLabel = formData.gender === 'female' ? 'Left Hand' : 'Right Hand';
   const preferredHandSinhala = formData.gender === 'female' ? 'වම් අත' : 'දකුණු අත';
 
   const stopCamera = () => {
-    const stream = videoRef.current?.srcObject as MediaStream | null;
+    const stream =
+      currentStreamRef.current ||
+      ((videoRef.current?.srcObject as MediaStream | null) ?? null);
     stream?.getTracks().forEach((track) => track.stop());
+    currentStreamRef.current = null;
     if (videoRef.current) {
       videoRef.current.srcObject = null;
     }
     setCameraOpen(false);
+  };
+
+  const attachCurrentStreamToVideo = async () => {
+    const stream = currentStreamRef.current;
+    if (!stream) return false;
+
+    for (let attempt = 0; attempt < 12; attempt += 1) {
+      const video = videoRef.current;
+      if (!video) {
+        await new Promise<void>((resolve) => window.setTimeout(resolve, 30));
+        continue;
+      }
+
+      video.srcObject = stream;
+      video.muted = true;
+      video.setAttribute('muted', 'true');
+      video.setAttribute('playsinline', 'true');
+      video.setAttribute('autoplay', 'true');
+
+      try {
+        await video.play();
+      } catch {
+        // Some mobile browsers need a short delay before play() works.
+      }
+
+      if (video.videoWidth > 0 && video.videoHeight > 0) {
+        return true;
+      }
+
+      await new Promise<void>((resolve) => {
+        const onLoaded = () => {
+          video.removeEventListener('loadedmetadata', onLoaded);
+          resolve();
+        };
+        video.addEventListener('loadedmetadata', onLoaded, { once: true });
+        window.setTimeout(resolve, 220);
+      });
+
+      if (video.videoWidth > 0 && video.videoHeight > 0) {
+        return true;
+      }
+    }
+
+    return false;
   };
 
   const getCameraStream = async () => {
@@ -309,33 +357,26 @@ const PaymentSuccessPage: React.FC<{ userId: string }> = ({ userId }) => {
     setCameraStarting(true);
     try {
       const stream = await getCameraStream();
+      currentStreamRef.current = stream;
       setCameraOpen(true);
-      if (videoRef.current) {
-        const video = videoRef.current;
-        video.srcObject = stream;
-        video.muted = true;
-        video.setAttribute('muted', 'true');
-        video.setAttribute('playsinline', 'true');
-        await video.play().catch(() => {
-          // On some mobile browsers play() fails before metadata is ready.
-        });
-
-        if (video.videoWidth === 0 || video.videoHeight === 0) {
-          await new Promise<void>((resolve) => {
-            video.onloadedmetadata = () => resolve();
-            setTimeout(() => resolve(), 1200);
-          });
-          await video.play().catch(() => {});
-        }
+      const attached = await attachCurrentStreamToVideo();
+      if (!attached) {
+        throw new Error('Camera stream could not be attached to preview.');
       }
     } catch (error) {
       console.error('Palm capture camera failed', error);
+      stopCamera();
       setCameraOpen(false);
       setCameraError('Camera access could not be started. Please allow camera permission and try again.');
     } finally {
       setCameraStarting(false);
     }
   };
+
+  useEffect(() => {
+    if (!cameraOpen) return;
+    void attachCurrentStreamToVideo();
+  }, [cameraOpen]);
 
   const capturePalm = () => {
     if (!videoRef.current || !canvasRef.current) return;
