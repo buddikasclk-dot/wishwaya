@@ -141,6 +141,25 @@ const enrichProfileAstrology = (profile: UserProfile): UserProfile => {
 const LOCAL_PROFILE_KEY = 'kendara_profile';
 const LOCAL_PROFILE_OWNER_KEY = 'wishwaya_profile_owner_uid';
 const ACTIVE_TAB_KEY = 'wishwaya_active_tab';
+const VALID_TABS = new Set([
+  'dashboard',
+  'matching',
+  'baby-naming',
+  'dreams',
+  'palm',
+  'vastu',
+  'nekath',
+  'avurudu',
+  'gems',
+  'omens',
+  'rahu',
+  'remedies',
+  'loa',
+  'pastlife',
+  'profile',
+]);
+
+const normalizeTab = (tab: string | null | undefined) => (tab && VALID_TABS.has(tab) ? tab : 'dashboard');
 
 const MASTER_PROFILE_CITY_ALIASES = ['kalthota', 'balangoda'];
 const MASTER_PROFILE_ASTRO: Partial<UserProfile> = {
@@ -166,6 +185,7 @@ const PaymentSuccessPage: React.FC<{ userId: string }> = ({ userId }) => {
   const [requestId, setRequestId] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
   const [cameraOpen, setCameraOpen] = useState(false);
+  const [cameraStarting, setCameraStarting] = useState(false);
   const [cameraError, setCameraError] = useState<string | null>(null);
   const [generalError, setGeneralError] = useState<string | null>(null);
   const [capturedImage, setCapturedImage] = useState<string | null>(null);
@@ -198,6 +218,38 @@ const PaymentSuccessPage: React.FC<{ userId: string }> = ({ userId }) => {
       videoRef.current.srcObject = null;
     }
     setCameraOpen(false);
+  };
+
+  const getCameraStream = async () => {
+    const attempts: MediaStreamConstraints[] = [
+      {
+        video: {
+          facingMode: { ideal: 'environment' },
+          width: { ideal: 1280 },
+          height: { ideal: 1920 },
+        },
+        audio: false,
+      },
+      {
+        video: { facingMode: 'environment' },
+        audio: false,
+      },
+      {
+        video: true,
+        audio: false,
+      },
+    ];
+
+    let lastError: unknown = null;
+    for (const constraints of attempts) {
+      try {
+        return await navigator.mediaDevices.getUserMedia(constraints);
+      } catch (error) {
+        lastError = error;
+      }
+    }
+
+    throw lastError || new Error('Camera could not be started');
   };
 
   const analyzePalmQuality = (canvas: HTMLCanvasElement) => {
@@ -250,24 +302,45 @@ const PaymentSuccessPage: React.FC<{ userId: string }> = ({ userId }) => {
   };
 
   const startCamera = async () => {
+    if (cameraStarting) return;
     setCameraError(null);
+    setCameraStarting(true);
     try {
-      const stream = await navigator.mediaDevices.getUserMedia({
-        video: { facingMode: 'environment' },
-        audio: false,
-      });
-      if (videoRef.current) {
-        videoRef.current.srcObject = stream;
-      }
+      const stream = await getCameraStream();
       setCameraOpen(true);
+      if (videoRef.current) {
+        const video = videoRef.current;
+        video.srcObject = stream;
+        video.muted = true;
+        video.setAttribute('muted', 'true');
+        video.setAttribute('playsinline', 'true');
+        await video.play().catch(() => {
+          // On some mobile browsers play() fails before metadata is ready.
+        });
+
+        if (video.videoWidth === 0 || video.videoHeight === 0) {
+          await new Promise<void>((resolve) => {
+            video.onloadedmetadata = () => resolve();
+            setTimeout(() => resolve(), 1200);
+          });
+          await video.play().catch(() => {});
+        }
+      }
     } catch (error) {
       console.error('Palm capture camera failed', error);
+      setCameraOpen(false);
       setCameraError('Camera access could not be started. Please allow camera permission and try again.');
+    } finally {
+      setCameraStarting(false);
     }
   };
 
   const capturePalm = () => {
     if (!videoRef.current || !canvasRef.current) return;
+    if (videoRef.current.videoWidth < 1 || videoRef.current.videoHeight < 1) {
+      setCameraError('Camera preview is not ready yet. Please wait a second and try again.');
+      return;
+    }
     const context = canvasRef.current.getContext('2d');
     if (!context) return;
 
@@ -356,12 +429,6 @@ const PaymentSuccessPage: React.FC<{ userId: string }> = ({ userId }) => {
       stopCamera();
     };
   }, [userId]);
-
-  useEffect(() => {
-    if (stage !== 'form' || capturedImage || cameraOpen) return;
-    if (!navigator.mediaDevices?.getUserMedia) return;
-    void startCamera();
-  }, [stage, capturedImage, cameraOpen]);
 
   const updateProfileCache = () => {
     const savedProfile = localStorage.getItem(LOCAL_PROFILE_KEY);
@@ -532,18 +599,20 @@ const PaymentSuccessPage: React.FC<{ userId: string }> = ({ userId }) => {
                     <button
                       type="button"
                       onClick={() => void startCamera()}
-                      className="rounded-full bg-slate-900 px-5 py-3 text-sm font-black text-white"
+                      disabled={cameraStarting}
+                      className="rounded-full bg-slate-900 px-5 py-3 text-sm font-black text-white disabled:opacity-70"
                     >
-                      Retake Palm Photo
+                      {cameraStarting ? 'Starting Camera...' : 'Retake Palm Photo'}
                     </button>
                   </div>
                 ) : (
                   <button
                     type="button"
                     onClick={() => void startCamera()}
-                    className="rounded-full bg-slate-900 px-5 py-3 text-sm font-black text-white"
+                    disabled={cameraStarting}
+                    className="rounded-full bg-slate-900 px-5 py-3 text-sm font-black text-white disabled:opacity-70"
                   >
-                    Open Camera
+                    {cameraStarting ? 'Starting Camera...' : 'Open Camera'}
                   </button>
                 )}
               </div>
@@ -587,7 +656,7 @@ const PaymentSuccessPage: React.FC<{ userId: string }> = ({ userId }) => {
 
       {cameraOpen && (
         <div className="fixed inset-0 z-[260] bg-black">
-          <video ref={videoRef} autoPlay playsInline className="h-full w-full object-cover" />
+          <video ref={videoRef} autoPlay muted playsInline className="h-full w-full object-cover" />
           <div className="pointer-events-none absolute inset-0 flex items-center justify-center">
             <div className="h-[62vh] w-[74vw] max-w-[320px] rounded-[3rem] border-2 border-white/80 shadow-[0_0_0_9999px_rgba(0,0,0,0.35)]" />
           </div>
@@ -625,8 +694,7 @@ const App: React.FC = () => {
   const [activeTab, setActiveTab] = useState(() => {
     if (typeof window === 'undefined') return 'dashboard';
     const queryTab = new URLSearchParams(window.location.search).get('tab');
-    if (queryTab) return queryTab;
-    return 'dashboard';
+    return normalizeTab(queryTab);
   });
   const [showSplash, setShowSplash] = useState(true);
   const [isGlobalLoading, setIsGlobalLoading] = useState(false);
@@ -787,12 +855,17 @@ const App: React.FC = () => {
 
   useEffect(() => {
     if (typeof window === 'undefined') return;
-    sessionStorage.setItem(ACTIVE_TAB_KEY, activeTab);
+    const safeTab = normalizeTab(activeTab);
+    if (safeTab !== activeTab) {
+      setActiveTab(safeTab);
+      return;
+    }
+    sessionStorage.setItem(ACTIVE_TAB_KEY, safeTab);
     const url = new URL(window.location.href);
-    if (activeTab === 'dashboard') {
+    if (safeTab === 'dashboard') {
       url.searchParams.delete('tab');
     } else {
-      url.searchParams.set('tab', activeTab);
+      url.searchParams.set('tab', safeTab);
     }
     window.history.replaceState({}, '', `${url.pathname}${url.search}${url.hash}`);
   }, [activeTab]);
