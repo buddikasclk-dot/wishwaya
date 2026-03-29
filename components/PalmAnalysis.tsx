@@ -2,6 +2,7 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { PalmAnalysisState } from '../types';
 import { ResultLoadingScreen } from './ResultLoadingScreen';
+import DetailedReportCTA from './DetailedReportCTA';
 
 interface PalmAnalysisProps {
   gender: string;
@@ -284,6 +285,7 @@ const PalmAnalysis: React.FC<PalmAnalysisProps> = ({ gender, palmState, setPalmS
             නැවත පරීක්ෂා කරන්න
           </button>
         </div>
+      <DetailedReportCTA />
       </div>
     );
   }

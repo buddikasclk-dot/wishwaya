@@ -3,6 +3,7 @@ import React, { useEffect, useState } from 'react';
 import { UserProfile, AuspiciousTimes } from '../types';
 import { getAuspiciousTimes } from '../services/geminiService';
 import { ResultLoadingScreen } from './ResultLoadingScreen';
+import DetailedReportCTA from './DetailedReportCTA';
 
 interface NekathProps {
   profile: UserProfile;
@@ -117,6 +118,7 @@ const Nekath: React.FC<NekathProps> = ({ profile }) => {
           ඉහත දක්වා ඇති සියලුම වේලාවන් ශ්‍රී ලංකාවේ සම්මත වේලාවෙන් සහ දේශීය ජ්‍යෝතිෂ්‍ය නීති රීති වලට අනුකූලව ගණනය කර ඇත.
         </p>
       </div>
+      <DetailedReportCTA />
     </div>
   );
 };

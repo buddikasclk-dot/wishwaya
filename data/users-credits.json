@@ -1,0 +1,26 @@
+[
+  {
+    "user_id": "test-user",
+    "free_messages_used": 1,
+    "paid_credits": 0,
+    "total_credits": 0,
+    "is_premium": false,
+    "updated_at": "2026-03-29T19:16:55.839Z"
+  },
+  {
+    "user_id": "a6r7kHrK5eOGJm9tKF8TAn254jD3",
+    "free_messages_used": 4,
+    "paid_credits": 0,
+    "total_credits": 0,
+    "is_premium": false,
+    "updated_at": "2026-03-29T19:36:51.409Z"
+  },
+  {
+    "user_id": "test-hi-user",
+    "free_messages_used": 0,
+    "paid_credits": 0,
+    "total_credits": 0,
+    "is_premium": false,
+    "updated_at": "2026-03-29T19:32:16.747Z"
+  }
+]

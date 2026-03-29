@@ -3,6 +3,7 @@ import React, { useEffect, useState } from 'react';
 import { UserProfile, RemedyResult } from '../types';
 import { getSpiritualRemedies } from '../services/geminiService';
 import { ResultLoadingScreen } from './ResultLoadingScreen';
+import DetailedReportCTA from './DetailedReportCTA';
 
 interface RemediesProps {
   profile: UserProfile;
@@ -119,6 +120,7 @@ const Remedies: React.FC<RemediesProps> = ({ profile }) => {
           සියලු වත්පිළිවෙත් පිරිසිදු සිතින් ඉටු කිරීම වඩාත් සුබ පල ලබා දෙයි. විශ්වාසය සහ භක්තිය අපල දුරු කිරීමට උපකාරී වේ.
         </p>
       </div>
+      {!error && <DetailedReportCTA />}
     </div>
   );
 };

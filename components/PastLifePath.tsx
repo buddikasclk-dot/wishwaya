@@ -3,6 +3,7 @@ import React, { useEffect, useState } from 'react';
 import { UserProfile, PastLifeResult } from '../types';
 import { getPastLifeReading } from '../services/geminiService';
 import { ResultLoadingScreen } from './ResultLoadingScreen';
+import DetailedReportCTA from './DetailedReportCTA';
 
 interface PastLifePathProps {
   profile: UserProfile;
@@ -148,6 +149,11 @@ const PastLifePath: React.FC<PastLifePathProps> = ({ profile }) => {
       <div className="text-center opacity-40 pb-4">
         <p className="text-[9px] text-gray-400 font-black uppercase tracking-[0.4em]">Wisdom Across Time • Wishwaya AI</p>
       </div>
+      {!error && (
+        <div className="px-6 pb-6">
+          <DetailedReportCTA />
+        </div>
+      )}
     </div>
   );
 };

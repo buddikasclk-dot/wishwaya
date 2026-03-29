@@ -3,6 +3,7 @@ import React, { useEffect, useState } from 'react';
 import { UserProfile, GemstoneAdvice } from '../types';
 import { getGemstoneAdvice } from '../services/geminiService';
 import { ResultLoadingScreen } from './ResultLoadingScreen';
+import DetailedReportCTA from './DetailedReportCTA';
 
 interface GemstonesProps {
   profile: UserProfile;
@@ -104,6 +105,7 @@ const Gemstones: React.FC<GemstonesProps> = ({ profile }) => {
           </div>
         </div>
       )}
+      {!error && <DetailedReportCTA />}
     </div>
   );
 };

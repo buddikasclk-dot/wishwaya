@@ -3,7 +3,6 @@ import React from 'react';
 import ReactDOM from 'react-dom/client';
 import App from './App';
 import { AuthProvider } from './auth/AuthContext';
-import AppErrorBoundary from './components/AppErrorBoundary';
 import './index.css';
 
 const rootElement = document.getElementById('root');
@@ -46,10 +45,8 @@ if ('serviceWorker' in navigator) {
 
 root.render(
   <React.StrictMode>
-    <AppErrorBoundary>
-      <AuthProvider>
-        <App />
-      </AuthProvider>
-    </AppErrorBoundary>
+    <AuthProvider>
+      <App />
+    </AuthProvider>
   </React.StrictMode>
 );

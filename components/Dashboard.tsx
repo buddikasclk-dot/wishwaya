@@ -1,6 +1,7 @@
 ﻿import React, { useEffect, useState } from 'react';
 import { LuckHighlights, Prediction, UserProfile } from '../types';
 import { getLuckHighlights, getPredictions } from '../services/geminiService';
+import DetailedReportCTA from './DetailedReportCTA';
 
 interface DashboardProps {
   profile: UserProfile;
@@ -358,6 +359,9 @@ const Dashboard: React.FC<DashboardProps> = ({ profile, onNavigate, showPreparat
       </section>
 
       <footer className="pt-8 pb-12 flex flex-col items-center space-y-4">
+        <div className="w-full">
+          <DetailedReportCTA onOpenReport={() => onNavigate?.('profile')} />
+        </div>
         <div className="w-16 h-1 bg-gray-200 rounded-full mb-2" />
         <div className="text-center space-y-2">
           <div className="bg-white/60 backdrop-blur-sm border border-gray-100 py-3 px-8 rounded-2xl shadow-sm inline-block">
