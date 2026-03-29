@@ -113,7 +113,7 @@ const PremiumAstroReports: React.FC<PremiumAstroReportsProps> = ({
     if (!pendingOpenAfterAuth || !userEmail) return;
     setPendingOpenAfterAuth(false);
     setError(null);
-    setFlowStep('intro');
+    setFlowStep('checkout');
   }, [pendingOpenAfterAuth, userEmail]);
 
   const openReport = async (report: AstroReportRecord) => {
@@ -139,25 +139,23 @@ const PremiumAstroReports: React.FC<PremiumAstroReportsProps> = ({
   };
 
   const openPremiumFlow = async () => {
-    if (authLoading) return;
-
-    if (authEnabled && !userEmail) {
-      setActionLoading(true);
-      setError(null);
-      setPendingOpenAfterAuth(true);
-      try {
-        await onRequireGoogleLink();
-      } catch (nextError: any) {
-        setPendingOpenAfterAuth(false);
-        setError(nextError?.message || 'Google account linking is required before payment.');
-      } finally {
-        setActionLoading(false);
-      }
-      return;
-    }
-
     setError(null);
     setFlowStep('intro');
+  };
+
+  const handleOptionalGoogleSignIn = async () => {
+    if (authLoading) return;
+    setActionLoading(true);
+    setError(null);
+    setPendingOpenAfterAuth(true);
+    try {
+      await onRequireGoogleLink();
+    } catch (nextError: any) {
+      setPendingOpenAfterAuth(false);
+      setError(nextError?.message || 'Google account linking failed.');
+    } finally {
+      setActionLoading(false);
+    }
   };
 
   const renderSection = (section: AstroReportSection) => (
@@ -188,7 +186,7 @@ const PremiumAstroReports: React.FC<PremiumAstroReportsProps> = ({
                 <span>✦</span>
                 <span>PREMIUM ASTRO REPORT</span>
               </div>
-              <h3 className="text-2xl font-black text-slate-900">සම්පූර්ණ Astro Report එක ලබාගන්න</h3>
+              <h3 className="text-2xl font-black text-slate-900">ජෝතීශ්‍යට අනුව ඔබේ සම්පුර්ණ වර්තාව ලබාගන්න</h3>
               <p className="sinhala text-sm leading-6 text-slate-600">ඔබ ගැන සම්පූර්ණ ජෝතිශ්‍ය විග්‍රහය ලබාගන්න</p>
             </div>
             <div className="rounded-full border border-emerald-100 bg-white/85 px-4 py-2 text-sm font-black text-emerald-700 shadow-sm">
@@ -215,9 +213,6 @@ const PremiumAstroReports: React.FC<PremiumAstroReportsProps> = ({
           >
             {actionLoading || authLoading ? 'Please wait...' : 'සම්පූර්ණ වාර්තාව ලබාගන්න'}
           </button>
-          {authEnabled && !userEmail && (
-            <p className="text-xs text-slate-500">Google sign-in will open first, then Stripe will use that email for payment.</p>
-          )}
         </div>
       </div>
 
@@ -322,7 +317,7 @@ const PremiumAstroReports: React.FC<PremiumAstroReportsProps> = ({
               <div className="space-y-6 pr-10">
                 <div className="space-y-2">
                   <p className="text-[10px] font-black uppercase tracking-[0.28em] text-emerald-600">හැඳින්වීම</p>
-                  <h3 className="text-3xl font-black text-slate-900">සම්පූර්ණ Astro Report එක ලබාගන්න</h3>
+                  <h3 className="text-3xl font-black text-slate-900">ජෝතීශ්‍යට අනුව ඔබේ සම්පුර්ණ වර්තාව ලබාගන්න</h3>
                 </div>
                 <p className="sinhala text-sm leading-8 text-slate-600">
                   ඔබගේ උපන් තොරතුරු, ජන්ම කේන්ද්‍රය, අත් රේඛා සහ පුද්ගලික ජීවිත රටාවන් පදනම් කරගෙන
@@ -402,6 +397,22 @@ const PremiumAstroReports: React.FC<PremiumAstroReportsProps> = ({
                 <div className="rounded-[2rem] border border-sky-100 bg-sky-50/70 p-5 text-sm leading-7 text-slate-600">
                   Pay securely with Stripe.
                 </div>
+                {authEnabled && !userEmail && (
+                  <div className="rounded-[2rem] border border-emerald-100 bg-white/85 p-5 shadow-sm">
+                    <p className="text-sm font-black text-slate-800">Optional</p>
+                    <p className="mt-2 sinhala text-sm leading-7 text-slate-600">
+                      Google සමග ගිනුම ආරම්භ කරන්න. එවිට Stripe checkout එකේ ඔබගේ email එක පුරවා දිස්වේ.
+                    </p>
+                    <button
+                      type="button"
+                      onClick={() => void handleOptionalGoogleSignIn()}
+                      disabled={actionLoading || authLoading}
+                      className="mt-4 rounded-full border border-emerald-200 bg-emerald-50 px-5 py-3 text-sm font-black text-emerald-800 disabled:opacity-70"
+                    >
+                      {actionLoading || authLoading ? 'Please wait...' : 'Google සමග ගිනුම ආරම්භ කරන්න'}
+                    </button>
+                  </div>
+                )}
                 <div className="sticky bottom-0 -mx-2 bg-gradient-to-t from-[#f4fbff] via-[#f4fbff] to-transparent px-2 pt-5">
                   <StripeCheckoutButton label="Pay with Stripe" customerEmail={userEmail} />
                 </div>

@@ -454,7 +454,7 @@ const PaymentSuccessPage: React.FC<{ userId: string }> = ({ userId }) => {
             <div className="rounded-[2rem] border border-emerald-100 bg-emerald-50/60 p-5">
               <p className="text-xs font-black uppercase tracking-[0.24em] text-emerald-700">Final Details</p>
               <p className="mt-3 sinhala text-sm leading-7 text-slate-700">
-                පෙර සුරකින ලද උපන් තොරතුරු ස්වයංක්‍රීයව පුරවා ඇත. අඩු දේ තිබේ නම් පුරවන්න, ඉන්පසු {preferredHandSinhala} ({preferredHandLabel}) පැහැදිලිව capture කරන්න.
+                පෙර සුරකින ලද උපන් තොරතුරු ස්වයංක්‍රීයව පුරවා ඇත. අඩු දේ තිබේ නම් පුරවන්න. පුරුෂයන් සඳහා දකුණු අත (Right Hand) සහ කාන්තාවන් සඳහා වම් අත (Left Hand) පැහැදිලිව capture කරන්න.
               </p>
             </div>
 
@@ -626,7 +626,7 @@ const App: React.FC = () => {
     if (typeof window === 'undefined') return 'dashboard';
     const queryTab = new URLSearchParams(window.location.search).get('tab');
     if (queryTab) return queryTab;
-    return sessionStorage.getItem(ACTIVE_TAB_KEY) || 'dashboard';
+    return 'dashboard';
   });
   const [showSplash, setShowSplash] = useState(true);
   const [isGlobalLoading, setIsGlobalLoading] = useState(false);
@@ -788,14 +788,13 @@ const App: React.FC = () => {
   useEffect(() => {
     if (typeof window === 'undefined') return;
     sessionStorage.setItem(ACTIVE_TAB_KEY, activeTab);
-  }, [activeTab]);
-
-  useEffect(() => {
-    if (typeof window === 'undefined') return;
-    const queryTab = new URLSearchParams(window.location.search).get('tab');
-    if (queryTab && queryTab !== activeTab) {
-      setActiveTab(queryTab);
+    const url = new URL(window.location.href);
+    if (activeTab === 'dashboard') {
+      url.searchParams.delete('tab');
+    } else {
+      url.searchParams.set('tab', activeTab);
     }
+    window.history.replaceState({}, '', `${url.pathname}${url.search}${url.hash}`);
   }, [activeTab]);
 
   const handleOnboardingComplete = async (newProfile: UserProfile) => {
@@ -997,7 +996,9 @@ const App: React.FC = () => {
     }
   };
 
-  if (showSplash || authLoading || profileLoading) return <GlobalLoader />; 
+  const showInlineProfilePreparation = profileLoading && !!profile;
+
+  if (showSplash || authLoading || (!profile && profileLoading)) return <GlobalLoader />; 
 
   return (
     <LoadingContext.Provider value={{ setIsGlobalLoading }}>
@@ -1079,7 +1080,13 @@ const App: React.FC = () => {
             )}
 
             <main className="flex-1 overflow-y-auto pb-32 scroll-smooth no-scrollbar">
-              {activeTab === 'dashboard' && <Dashboard profile={profile} onNavigate={setActiveTab} />}
+              {activeTab === 'dashboard' && (
+                <Dashboard
+                  profile={profile}
+                  onNavigate={setActiveTab}
+                  showPreparationNotice={showInlineProfilePreparation}
+                />
+              )}
               {activeTab === 'matching' && (
                 <Matching 
                   userProfile={profile} 

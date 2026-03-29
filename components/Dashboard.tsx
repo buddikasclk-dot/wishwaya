@@ -5,6 +5,7 @@ import { getLuckHighlights, getPredictions } from '../services/geminiService';
 interface DashboardProps {
   profile: UserProfile;
   onNavigate?: (tab: string) => void;
+  showPreparationNotice?: boolean;
 }
 
 const RASHI_DATA: Record<string, { sinhala: string; icon: string; color: string; glow: string }> = {
@@ -160,7 +161,7 @@ const getSinhalaWeeklySummary = (summary: string, rashiName: string) => {
   return translated;
 };
 
-const Dashboard: React.FC<DashboardProps> = ({ profile, onNavigate }) => {
+const Dashboard: React.FC<DashboardProps> = ({ profile, onNavigate, showPreparationNotice = false }) => {
   const [highlights, setHighlights] = useState<LuckHighlights | null>(null);
   const [predictions, setPredictions] = useState<Prediction | null>(null);
   const [highlightsLoading, setHighlightsLoading] = useState(true);
@@ -219,8 +220,22 @@ const Dashboard: React.FC<DashboardProps> = ({ profile, onNavigate }) => {
       }
     : null;
 
+  const showDataPreparingBanner =
+    showPreparationNotice || highlightsLoading || predictionsLoading;
+
   return (
     <div className="p-6 pb-24 space-y-8 animate-in fade-in duration-500">
+      {showDataPreparingBanner && (
+        <div className="rounded-[1.75rem] border border-emerald-100 bg-[linear-gradient(135deg,_rgba(236,253,245,0.98)_0%,_rgba(239,246,255,0.98)_100%)] px-4 py-3 shadow-sm">
+          <div className="flex items-center gap-3">
+            <span className="inline-flex h-2.5 w-2.5 rounded-full bg-emerald-500 animate-ping" />
+            <p className="sinhala text-xs leading-6 text-slate-700">
+              ඔබගේ දත්ත විශ්ලේෂණය කර සකස් කරමින් පවතී. මෙයට සුළු වේලාවක් ගත විය හැක
+            </p>
+          </div>
+        </div>
+      )}
+
       <header className="pt-2 space-y-4">
         <div className={`relative overflow-hidden rounded-[2.5rem] border border-white/80 bg-gradient-to-br ${rashiTheme.glow} p-5 shadow-[0_25px_60px_-30px_rgba(16,24,40,0.28)]`}>
           <div className="absolute -top-8 -right-6 h-28 w-28 rounded-full bg-white/70 blur-2xl" />
