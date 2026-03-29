@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef, createContext, useContext } from 'react';
+import React, { useState, useEffect, useLayoutEffect, useRef, createContext, useContext } from 'react';
 import Onboarding from '../components/Onboarding';
 import Dashboard from '../components/Dashboard';
 import Matching from '../components/Matching';
@@ -20,6 +20,7 @@ import GlobalLoader from '../components/GlobalLoader';
 import NotificationSettings from '../components/NotificationSettings';
 import ProfileEditor from '../components/ProfileEditor';
 import PremiumAstroReports from '../components/PremiumAstroReports';
+import AstrologyConsultantScreen from '../components/AstrologyConsultantScreen';
 import { useAuth } from './auth/AuthContext';
 import { getEffectiveUserId, migrateUserIdToFirebase } from './auth/userIdentity';
 import { getUserProfile, saveUserProfile } from './services/userProfileStore';
@@ -156,6 +157,7 @@ const VALID_TABS = new Set([
   'remedies',
   'loa',
   'pastlife',
+  'consultant',
   'profile',
 ]);
 
@@ -710,6 +712,7 @@ const App: React.FC = () => {
   const [profileLoading, setProfileLoading] = useState(true);
   const [profileSaveLoading, setProfileSaveLoading] = useState(false);
   const [profileSaveError, setProfileSaveError] = useState<string | null>(null);
+  const mainScrollRef = useRef<HTMLElement | null>(null);
   const effectiveUserId = getEffectiveUserId(user?.uid);
 
   if (currentPath === '/payment-success') {
@@ -868,6 +871,27 @@ const App: React.FC = () => {
       url.searchParams.set('tab', safeTab);
     }
     window.history.replaceState({}, '', `${url.pathname}${url.search}${url.hash}`);
+  }, [activeTab]);
+
+  useLayoutEffect(() => {
+    // Force-reset scroll for all likely scroll roots after every tab switch.
+    const resetScroll = () => {
+      if (mainScrollRef.current) {
+        mainScrollRef.current.scrollTop = 0;
+      }
+      window.scrollTo({ top: 0, behavior: 'auto' });
+      document.documentElement.scrollTop = 0;
+      document.body.scrollTop = 0;
+    };
+
+    resetScroll();
+    const raf = window.requestAnimationFrame(resetScroll);
+    const timeout = window.setTimeout(resetScroll, 60);
+
+    return () => {
+      window.cancelAnimationFrame(raf);
+      window.clearTimeout(timeout);
+    };
   }, [activeTab]);
 
   const handleOnboardingComplete = async (newProfile: UserProfile) => {
@@ -1152,7 +1176,7 @@ const App: React.FC = () => {
               </div>
             )}
 
-            <main className="flex-1 overflow-y-auto pb-32 scroll-smooth no-scrollbar">
+            <main ref={mainScrollRef} data-tab-scroll-root className="flex-1 overflow-y-auto pb-32 scroll-smooth no-scrollbar">
               {activeTab === 'dashboard' && (
                 <Dashboard
                   profile={profile}
@@ -1206,6 +1230,13 @@ const App: React.FC = () => {
               {activeTab === 'remedies' && <Remedies profile={profile} />}
               {activeTab === 'loa' && <LawOfAttraction profile={profile} />}
               {activeTab === 'pastlife' && <PastLifePath profile={profile} />}
+              {activeTab === 'consultant' && (
+                <AstrologyConsultantScreen
+                  profile={profile}
+                  userId={effectiveUserId}
+                  userEmail={user?.email || null}
+                />
+              )}
               {activeTab === 'profile' && (
                 <div className="animate-in slide-in-from-bottom-8 duration-700">
                   {/* Hero Header with Video Background */}

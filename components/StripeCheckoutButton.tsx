@@ -4,12 +4,16 @@ interface StripeCheckoutButtonProps {
   className?: string;
   label?: string;
   customerEmail?: string | null;
+  apiEndpoint?: string;
+  payload?: Record<string, unknown>;
 }
 
 const StripeCheckoutButton: React.FC<StripeCheckoutButtonProps> = ({
   className = 'w-full rounded-full bg-slate-900 px-6 py-4 text-sm font-black text-white shadow-lg shadow-slate-300',
   label = 'Pay with Stripe',
   customerEmail = null,
+  apiEndpoint = '/api/create-checkout-session',
+  payload = {},
 }) => {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -19,13 +23,14 @@ const StripeCheckoutButton: React.FC<StripeCheckoutButtonProps> = ({
     setError(null);
 
     try {
-      const response = await fetch('/api/create-checkout-session', {
+      const response = await fetch(apiEndpoint, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
         },
         body: JSON.stringify({
           customerEmail,
+          ...payload,
         }),
       });
 

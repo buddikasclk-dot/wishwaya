@@ -405,3 +405,20 @@ export interface AstroReportRequirements {
   >;
   prefilled: Partial<AstroReportInputSnapshot>;
 }
+
+export interface ConsultantCredits {
+  user_id: string;
+  free_messages_used: number;
+  paid_credits: number;
+  total_credits: number;
+  is_premium: boolean;
+  free_remaining: number;
+  can_chat?: boolean;
+}
+
+export interface ConsultantChatMessage {
+  id: string;
+  role: 'user' | 'assistant';
+  text: string;
+  createdAt: string;
+}
