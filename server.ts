@@ -32,9 +32,32 @@ const app = express();
 const PORT = Number(process.env.PORT) || 3000;
 const STRIPE_SECRET_KEY = process.env.STRIPE_SECRET_KEY || '';
 const STRIPE_PRICE_WISHWAYA_PRO = process.env.STRIPE_PRICE_WISHWAYA_PRO || '';
+const STRIPE_PRICE_CONSULTANT_200 =
+  process.env.STRIPE_PRICE_CONSULTANT_200 ||
+  process.env.STRIPE_PRODUCT_ID_200 ||
+  'price_1TGOfsDfSHZ6MeOfXVXHAwW2';
+const STRIPE_PRICE_CONSULTANT_500 =
+  process.env.STRIPE_PRICE_CONSULTANT_500 ||
+  process.env.STRIPE_PRODUCT_ID_500 ||
+  'price_1TGOhDDfSHZ6MeOfJxI9jR4Z';
+const STRIPE_WEBHOOK_SECRET = process.env.STRIPE_WEBHOOK_SECRET || '';
 const APP_URL = (process.env.APP_URL || 'http://localhost:3000')
   .replace(/"+$/, '')
   .replace(/\/+$/, '');
+const SUPER_ADMIN_EMAILS = new Set(
+  (process.env.SUPER_ADMIN_EMAILS || '3dcafe.buddika@gmail.com,3dcafe.buddika@gmal.com')
+    .split(',')
+    .map((email) => email.trim().toLowerCase())
+    .filter(Boolean)
+);
+
+const normalizeEmail = (value: unknown) =>
+  typeof value === 'string' ? value.trim().toLowerCase() : '';
+
+const isSuperAdminEmail = (email: unknown) => {
+  const normalized = normalizeEmail(email);
+  return normalized ? SUPER_ADMIN_EMAILS.has(normalized) : false;
+};
 
 const createStripeCheckoutSession = async (customerEmail?: string | null) => {
   const body = new URLSearchParams();
@@ -59,6 +82,64 @@ const createStripeCheckoutSession = async (customerEmail?: string | null) => {
   const data = await response.json();
   if (!response.ok) {
     throw new Error(data?.error?.message || 'Failed to create Stripe checkout session');
+  }
+
+  return data;
+};
+
+type ConsultantPackageCode = 'starter_200' | 'premium_500';
+
+const getConsultantPackageConfig = (packageCode: ConsultantPackageCode) => {
+  if (packageCode === 'starter_200') {
+    return {
+      credits: 30,
+      priceLabel: 'Rs. 200',
+      priceId: STRIPE_PRICE_CONSULTANT_200,
+    };
+  }
+
+  return {
+    credits: 100,
+    priceLabel: 'Rs. 500',
+    priceId: STRIPE_PRICE_CONSULTANT_500,
+  };
+};
+
+const createConsultantCheckoutSession = async (input: {
+  packageCode: ConsultantPackageCode;
+  userId: string;
+  customerEmail?: string | null;
+}) => {
+  const packageConfig = getConsultantPackageConfig(input.packageCode);
+  if (!packageConfig.priceId) {
+    throw new Error(`Stripe price is missing for ${input.packageCode}`);
+  }
+
+  const body = new URLSearchParams();
+  body.set('mode', 'payment');
+  body.set('line_items[0][price]', packageConfig.priceId);
+  body.set('line_items[0][quantity]', '1');
+  body.set('success_url', `${APP_URL}/?tab=consultant&topup=success`);
+  body.set('cancel_url', `${APP_URL}/?tab=consultant&topup=cancel`);
+  body.set('metadata[userId]', input.userId);
+  body.set('metadata[packageCode]', input.packageCode);
+  body.set('metadata[feature]', 'astrology_consultant');
+  if (input.customerEmail) {
+    body.set('customer_email', input.customerEmail);
+  }
+
+  const response = await fetch('https://api.stripe.com/v1/checkout/sessions', {
+    method: 'POST',
+    headers: {
+      Authorization: `Bearer ${STRIPE_SECRET_KEY}`,
+      'Content-Type': 'application/x-www-form-urlencoded',
+    },
+    body,
+  });
+
+  const data = await response.json();
+  if (!response.ok) {
+    throw new Error(data?.error?.message || 'Failed to create consultant Stripe checkout session');
   }
 
   return data;
@@ -100,7 +181,89 @@ if (!fs.existsSync(DATA_DIR)) {
 
 const SUBSCRIPTIONS_FILE = path.join(DATA_DIR, 'subscriptions.json');
 const VAPID_KEYS_FILE = path.join(DATA_DIR, 'vapid.json');
+const USERS_CREDITS_FILE = path.join(DATA_DIR, 'users-credits.json');
 const premiumAstroReportEngine = new PremiumAstroReportEngine(DATA_DIR);
+
+type UserCreditsRecord = {
+  user_id: string;
+  free_messages_used: number;
+  paid_credits: number;
+  total_credits: number;
+  is_premium: boolean;
+  updated_at: string;
+};
+
+const buildSuperAdminCredits = (userId: string) => ({
+  user_id: userId,
+  free_messages_used: 0,
+  paid_credits: 999999,
+  total_credits: 999999,
+  is_premium: true,
+  free_remaining: 4,
+  can_chat: true,
+});
+
+const readUsersCredits = (): UserCreditsRecord[] => {
+  try {
+    if (!fs.existsSync(USERS_CREDITS_FILE)) return [];
+    const parsed = JSON.parse(fs.readFileSync(USERS_CREDITS_FILE, 'utf-8'));
+    return Array.isArray(parsed) ? parsed : [];
+  } catch (error) {
+    console.error('[consultant] failed to read users credits file', error);
+    return [];
+  }
+};
+
+const writeUsersCredits = (rows: UserCreditsRecord[]) => {
+  fs.writeFileSync(USERS_CREDITS_FILE, JSON.stringify(rows, null, 2));
+};
+
+const getOrCreateUserCredits = (userId: string): UserCreditsRecord => {
+  const rows = readUsersCredits();
+  const existing = rows.find((row) => row.user_id === userId);
+  if (existing) {
+    if (typeof existing.total_credits !== 'number') {
+      existing.total_credits = Math.max(0, Number(existing.paid_credits || 0));
+    }
+    return existing;
+  }
+
+  const created: UserCreditsRecord = {
+    user_id: userId,
+    free_messages_used: 0,
+    paid_credits: 0,
+    total_credits: 0,
+    is_premium: false,
+    updated_at: new Date().toISOString(),
+  };
+  rows.push(created);
+  writeUsersCredits(rows);
+  return created;
+};
+
+const updateUserCredits = (userId: string, updater: (row: UserCreditsRecord) => void) => {
+  const rows = readUsersCredits();
+  let target = rows.find((row) => row.user_id === userId);
+  if (!target) {
+    target = {
+      user_id: userId,
+      free_messages_used: 0,
+      paid_credits: 0,
+      total_credits: 0,
+      is_premium: false,
+      updated_at: new Date().toISOString(),
+    };
+    rows.push(target);
+  }
+
+  updater(target);
+  target.paid_credits = Math.max(0, Number(target.paid_credits || 0));
+  target.free_messages_used = Math.max(0, Number(target.free_messages_used || 0));
+  target.total_credits = target.paid_credits;
+  target.updated_at = new Date().toISOString();
+  writeUsersCredits(rows);
+  return target;
+};
 
 const migrateLegacyRuntimeFile = (fileName: string) => {
   const currentPath = path.join(DATA_DIR, fileName);
@@ -223,6 +386,175 @@ const relinkSubscriptions = (fromUserId: string, toUserId: string) => {
   }
 };
 
+const containsSinhala = (text: string) => /[\u0D80-\u0DFF]/.test(text);
+const containsEnglishLetters = (text: string) => /[A-Za-z]/.test(text);
+
+const countEnglishWords = (text: string) => {
+  const words = text.match(/[A-Za-z]{2,}/g);
+  return words ? words.length : 0;
+};
+
+const shouldReplyInEnglish = (query: string) => {
+  if (containsSinhala(query)) return false;
+  if (!containsEnglishLetters(query)) return false;
+  // Only switch to English when user writes a clear English sentence.
+  return countEnglishWords(query) >= 4;
+};
+
+const getShortGreetingReply = (query: string, userProfile: any): string | null => {
+  const normalized = query.trim().toLowerCase();
+  const greetingSet = new Set([
+    'hi',
+    'hello',
+    'hey',
+    'helo',
+    'hii',
+    'hai',
+    'good morning',
+    'good evening',
+    'good afternoon',
+    'ayubowan',
+    'ආයුබෝවන්',
+    'හෙලෝ',
+  ]);
+
+  if (!greetingSet.has(normalized)) {
+    return null;
+  }
+
+  const name = userProfile?.name || 'ඔබ';
+  return `ආයුබෝවන් ${name}, අපි සතුටින් ඔබව පිළිගන්නවා. 🌿\n\nඅපි ඔබගේ ගැටලුව step-by-step බලමු. කරුණාකර ඔබට දැන් විසඳුමක් අවශ්‍ය ප්‍රධාන කරුණ කෙටියෙන් කියන්න.\n\nඋදාහරණයක් ලෙස:\n• රැකියාව / මුදල්\n• ආදරය / පවුල\n• සෞඛ්‍යය / මානසික පීඩනය\n• අධ්‍යාපනය`;
+};
+
+const ASTROLOGY_CONSULTANT_SYSTEM_BASE = `You are the Lead Astrology Consultant for "Wishwaya". You specialize in Sri Lankan Lahiri (Chitra Paksha Ayanamsa) method.
+
+Tone and Personality:
+- Default language Sinhala.
+- If user writes clearly in long English sentences, reply in English.
+- Never switch to English for short greetings like "hi", "hello", "hey".
+- Use warm, responsible and compassionate tone.
+- Use "අපි" framing (we-oriented guidance) when replying in Sinhala.
+- Never leave user in fear. If a placement is difficult, give practical remedy and hope.
+- Give practical low-cost remedies: Bodhi Puja lamp, colors, charity, chanting, daily discipline.
+- Keep advice suitable for modern life.
+- Occasionally remind user their privacy is safe with Wishwaya.
+- Highlight key remedies clearly using markdown bold.
+`;
+
+const buildAstrologyConsultantSystemPrompt = (profile: any, isEnglish: boolean) => {
+  const profileAstroContext = {
+    name: profile?.name || 'Unknown',
+    dob: profile?.dob || 'Unknown',
+    birthTime: profile?.birthTime || 'Unknown',
+    birthPlace: profile?.city || 'Unknown',
+    gender: profile?.gender || 'Unknown',
+    lagna: profile?.lagna || null,
+    rashi: profile?.rashi || null,
+    nekatha: profile?.nekatha || null,
+    lagnaAdhipathi: profile?.lagnaAdhipathi || null,
+    janmaRashiya: profile?.janmaRashiya || null,
+    rashyadhipathi: profile?.rashyadhipathi || null,
+    nekathPadaya: profile?.nekathPadaya || null,
+    gana: profile?.gana || null,
+  };
+
+  const userContext = `User Info: Name=${profile?.name || 'Unknown'}, DOB=${profile?.dob || 'Unknown'}, Birth Time=${profile?.birthTime || 'Unknown'}, Birth Place=${profile?.city || 'Unknown'}, Gender=${profile?.gender || 'Unknown'}.
+Trusted astrology profile values (use as authoritative when present, do NOT override with guesses): ${JSON.stringify(profileAstroContext)}.
+If Lagna/Rashi/Nekatha already exist in trusted profile values, keep them fixed and build advice from them.
+Only estimate missing values if a field is null/empty.
+Always consider current Mahadasha context before advice.`;
+
+  const languageInstruction = isEnglish
+    ? 'Language: English (only because user clearly asked in English). Tone: professional and warm.'
+    : 'Language: Sinhala only. Use Sinhala script for full response. Tone: professional, warm, and Kalayana Mithra style.';
+
+  return `${ASTROLOGY_CONSULTANT_SYSTEM_BASE}
+${userContext}
+${languageInstruction}
+For short first-touch queries, keep response concise (4-7 lines) and ask one focused follow-up question.
+Avoid dumping full long report unless user explicitly asks detailed full analysis.
+Goal: Provide practical, responsible, hopeful guidance.`;
+};
+
+const getConsultantGeminiKeys = () =>
+  [
+    process.env.GEMINI_API_KEY_1,
+    process.env.GEMINI_API_KEY_2,
+    process.env.GEMINI_API_KEY,
+    process.env.API_KEY,
+  ]
+    .map((key) => (key || '').trim())
+    .filter((key, index, all) => key.length > 0 && all.indexOf(key) === index);
+
+const isGeminiTemporaryUnavailable = (error: any) => {
+  const text = String(error?.message || error || '').toUpperCase();
+  return text.includes('503') || text.includes('UNAVAILABLE') || text.includes('HIGH DEMAND');
+};
+
+const getAstrologyResponse = async (userQuery: string, userProfile: any, isFourthFreeMessage: boolean) => {
+  const apiKeys = getConsultantGeminiKeys();
+  if (apiKeys.length === 0) {
+    throw new Error('Gemini API key is missing');
+  }
+
+  const isEnglish = shouldReplyInEnglish(userQuery);
+  const systemPrompt = buildAstrologyConsultantSystemPrompt(userProfile, isEnglish);
+  const transitionMessage =
+    'අපි ඔබගේ ගැටලුව ගැන අවධානය යොමු කළා. ඉදිරියටත් ඉතා නිවැරදි සහ ගැඹුරු ජ්‍යොතිෂ උපදෙස් ලබා ගැනීමට, කරුණාකර අපගේ සේවාව සක්‍රිය කරගන්න.';
+
+  let lastError: any = null;
+
+  for (const apiKey of apiKeys) {
+    try {
+      const ai = new GoogleGenAI({ apiKey });
+      const response = await ai.models.generateContent({
+        model: 'gemini-3.1-flash-lite-preview',
+        config: {
+          systemInstruction: systemPrompt,
+          temperature: 0.7,
+          topP: 0.9,
+          safetySettings: [
+            { category: 'HARM_CATEGORY_HATE_SPEECH', threshold: 'BLOCK_NONE' },
+            { category: 'HARM_CATEGORY_HARASSMENT', threshold: 'BLOCK_NONE' },
+            { category: 'HARM_CATEGORY_DANGEROUS_CONTENT', threshold: 'BLOCK_NONE' },
+          ],
+        } as any,
+        contents: [
+          {
+            role: 'user',
+            parts: [{ text: userQuery }],
+          },
+        ],
+      } as any);
+
+      let text = (response as any)?.text || '';
+      if (!text?.trim()) {
+        throw new Error('Gemini returned an empty consultant response');
+      }
+
+      if (isFourthFreeMessage) {
+        text = `${text.trim()}\n\n${transitionMessage}`;
+      }
+
+      return text.trim();
+    } catch (error) {
+      lastError = error;
+      if (!isGeminiTemporaryUnavailable(error)) {
+        // non-temporary errors should fail fast
+        break;
+      }
+    }
+  }
+
+  if (isGeminiTemporaryUnavailable(lastError)) {
+    const unavailableError: any = new Error('CONSULTANT_TEMPORARY_UNAVAILABLE');
+    unavailableError.code = 'CONSULTANT_TEMPORARY_UNAVAILABLE';
+    throw unavailableError;
+  }
+
+  throw lastError || new Error('Gemini generation failed');
+};
+
 // --- Rahu Kalaya Logic ---
 
 const getRahuKalaya = (date: Date, lat: number, lng: number) => {
@@ -271,6 +603,18 @@ const getRahuKalaya = (date: Date, lat: number, lng: number) => {
 // Health Check
 app.get('/api/health', (req, res) => {
   res.json({ status: 'ok', timestamp: new Date().toISOString() });
+});
+
+app.get('/api/debug/routes', (req, res) => {
+  const stack = ((app as any)?._router?.stack || []) as Array<any>;
+  const routes = stack
+    .map((layer) => {
+      if (!layer.route) return null;
+      const methods = Object.keys(layer.route.methods || {}).map((m) => m.toUpperCase());
+      return { path: layer.route.path, methods };
+    })
+    .filter(Boolean);
+  res.json({ count: routes.length, routes });
 });
 
 // Config Endpoint (Expose API Key to Client)
@@ -553,6 +897,229 @@ app.post('/api/create-checkout-session', async (req, res) => {
   } catch (error: any) {
     console.error('[stripe] create checkout session failed', error);
     res.status(500).json({ error: error?.message || 'Failed to create checkout session' });
+  }
+});
+
+app.get('/api/consultant/credits', (req, res) => {
+  try {
+    const userId = String(req.query.userId || '').trim();
+    const userEmail = String(req.query.userEmail || '').trim();
+    if (!userId) {
+      return res.status(400).json({ error: 'userId is required' });
+    }
+    if (isSuperAdminEmail(userEmail)) {
+      return res.json(buildSuperAdminCredits(userId));
+    }
+
+    const credits = getOrCreateUserCredits(userId);
+    const freeRemaining = Math.max(0, 4 - credits.free_messages_used);
+    res.json({
+      user_id: credits.user_id,
+      free_messages_used: credits.free_messages_used,
+      paid_credits: credits.paid_credits,
+      total_credits: credits.total_credits,
+      is_premium: credits.is_premium,
+      free_remaining: freeRemaining,
+      can_chat: credits.paid_credits > 0 || credits.free_messages_used < 4,
+    });
+  } catch (error: any) {
+    console.error('[consultant] credits fetch failed', error);
+    res.status(500).json({ error: error?.message || 'Failed to fetch consultant credits' });
+  }
+});
+
+app.post('/api/consultant/create-checkout-session', async (req, res) => {
+  try {
+    if (!STRIPE_SECRET_KEY) {
+      return res.status(500).json({ error: 'Stripe secret key is missing' });
+    }
+
+    const packageCode = String(req.body?.packageCode || '').trim() as ConsultantPackageCode;
+    const userId = String(req.body?.userId || '').trim();
+    const userEmail = String(req.body?.userEmail || req.body?.customerEmail || '').trim();
+    const customerEmail =
+      typeof req.body?.customerEmail === 'string' && req.body.customerEmail.trim()
+        ? req.body.customerEmail.trim()
+        : null;
+
+    if (!userId) {
+      return res.status(400).json({ error: 'userId is required' });
+    }
+    if (packageCode !== 'starter_200' && packageCode !== 'premium_500') {
+      return res.status(400).json({ error: 'Invalid packageCode' });
+    }
+    if (isSuperAdminEmail(userEmail)) {
+      return res.status(200).json({
+        checkoutUrl: null,
+        sessionId: null,
+        packageCode,
+        bypassed: true,
+        message: 'Super admin account does not require consultant payment.',
+      });
+    }
+
+    const session = await createConsultantCheckoutSession({
+      packageCode,
+      userId,
+      customerEmail,
+    });
+
+    res.status(201).json({
+      checkoutUrl: session.url || null,
+      sessionId: session.id || null,
+      packageCode,
+    });
+  } catch (error: any) {
+    console.error('[consultant] create checkout session failed', error);
+    res.status(500).json({ error: error?.message || 'Failed to create consultant checkout session' });
+  }
+});
+
+app.post('/api/consultant/chat', async (req, res) => {
+  try {
+    const userId = String(req.body?.userId || '').trim();
+    const userEmail = String(req.body?.userEmail || '').trim();
+    const message = String(req.body?.message || '').trim();
+    const profile = req.body?.userProfile || null;
+
+    if (!userId) return res.status(400).json({ error: 'userId is required' });
+    if (!message) return res.status(400).json({ error: 'message is required' });
+
+    const superAdmin = isSuperAdminEmail(userEmail);
+    const currentCredits = superAdmin ? buildSuperAdminCredits(userId) : getOrCreateUserCredits(userId);
+    const canUsePaid = currentCredits.paid_credits > 0;
+    const canUseFree = currentCredits.free_messages_used < 4;
+
+    if (!canUsePaid && !canUseFree) {
+      return res.status(200).json({
+        status: 'limit_reached',
+        message:
+          'Your free consultation sessions are over. Please select a package to continue with your personal Astrology Consultant.',
+        credits: currentCredits,
+      });
+    }
+
+    const greetingReply = getShortGreetingReply(message, profile);
+    if (greetingReply) {
+      return res.json({
+        status: 'ok',
+        message: greetingReply,
+        credits: {
+          user_id: currentCredits.user_id,
+          free_messages_used: currentCredits.free_messages_used,
+          paid_credits: currentCredits.paid_credits,
+          total_credits: currentCredits.total_credits,
+          is_premium: currentCredits.is_premium,
+          free_remaining: Math.max(0, 4 - currentCredits.free_messages_used),
+        },
+      });
+    }
+
+    const isFourthFreeMessage = !canUsePaid && currentCredits.free_messages_used === 3;
+    const responseText = await getAstrologyResponse(message, profile, isFourthFreeMessage);
+
+    const updated = superAdmin
+      ? buildSuperAdminCredits(userId)
+      : updateUserCredits(userId, (row) => {
+          if (row.paid_credits > 0) {
+            row.paid_credits -= 1;
+            return;
+          }
+          if (row.free_messages_used < 4) {
+            row.free_messages_used += 1;
+          }
+        });
+
+    res.json({
+      status: 'ok',
+      message: responseText,
+      credits: {
+        user_id: updated.user_id,
+        free_messages_used: updated.free_messages_used,
+        paid_credits: updated.paid_credits,
+        total_credits: updated.total_credits,
+        is_premium: updated.is_premium,
+        free_remaining: Math.max(0, 4 - updated.free_messages_used),
+      },
+    });
+  } catch (error: any) {
+    if (error?.code === 'CONSULTANT_TEMPORARY_UNAVAILABLE') {
+      const userId = String(req.body?.userId || '').trim();
+      const userEmail = String(req.body?.userEmail || '').trim();
+      const currentCredits = userId
+        ? isSuperAdminEmail(userEmail)
+          ? buildSuperAdminCredits(userId)
+          : getOrCreateUserCredits(userId)
+        : null;
+      return res.status(200).json({
+        status: 'temporary_unavailable',
+        message:
+          'සමාවන්න, මේ මොහොතේ උපදේශක සේවාව ඉල්ලුම වැඩිවීම නිසා කෙටි ප්‍රමාදයක ඇත. කරුණාකර තත්පර කිහිපයකින් නැවත උත්සාහ කරන්න. ඔබගේ credit අඩු කර නොමැත.',
+        credits: currentCredits
+          ? {
+              user_id: currentCredits.user_id,
+              free_messages_used: currentCredits.free_messages_used,
+              paid_credits: currentCredits.paid_credits,
+              total_credits: currentCredits.total_credits,
+              is_premium: currentCredits.is_premium,
+              free_remaining: Math.max(0, 4 - currentCredits.free_messages_used),
+            }
+          : null,
+      });
+    }
+
+    console.error('[consultant] chat failed', error);
+    res.status(500).json({
+      error:
+        'උපදේශක ප්‍රතිචාරය මේ මොහොතේ ලබා ගැනීමට නොහැකි විය. කරුණාකර නැවත උත්සාහ කරන්න.',
+    });
+  }
+});
+
+app.post('/api/stripe/consultant-webhook', (req, res) => {
+  try {
+    const signature = req.headers['stripe-signature'];
+    if (!STRIPE_WEBHOOK_SECRET) {
+      console.warn('[consultant] STRIPE_WEBHOOK_SECRET not configured; processing webhook without signature check');
+    } else if (!signature) {
+      console.warn('[consultant] stripe-signature header missing');
+    }
+
+    const event = req.body || {};
+    if (event?.type !== 'checkout.session.completed') {
+      return res.json({ received: true, ignored: true });
+    }
+
+    const session = event.data?.object || {};
+    const packageCode = String(session?.metadata?.packageCode || '');
+    const userId = String(session?.metadata?.userId || '');
+
+    if (!userId || (packageCode !== 'starter_200' && packageCode !== 'premium_500')) {
+      return res.status(400).json({ error: 'Invalid webhook metadata' });
+    }
+
+    const packageConfig = getConsultantPackageConfig(packageCode as ConsultantPackageCode);
+    const updated = updateUserCredits(userId, (row) => {
+      row.paid_credits += packageConfig.credits;
+      if (packageCode === 'starter_200') {
+        row.free_messages_used = 4;
+      }
+      if (packageCode === 'premium_500') {
+        row.is_premium = true;
+      }
+    });
+
+    console.log('[consultant] webhook credits updated', {
+      userId,
+      packageCode,
+      creditsAdded: packageConfig.credits,
+      paidCredits: updated.paid_credits,
+    });
+
+    res.json({ received: true, updated: true });
+  } catch (error: any) {
+    console.error('[consultant] webhook failed', error);
+    res.status(500).json({ error: error?.message || 'Webhook processing failed' });
   }
 });
 
@@ -953,7 +1520,12 @@ async function startServer() {
         const { createServer } = await import('vite');
         const vite = await createServer({
           root: process.cwd(),
-          server: { middlewareMode: true },
+          server: {
+            middlewareMode: true,
+            watch: {
+              ignored: ['**/data/**', '**/*.log', '**/.tmp/**', '**/.tmp-run/**'],
+            },
+          },
           appType: 'spa',
         });
 

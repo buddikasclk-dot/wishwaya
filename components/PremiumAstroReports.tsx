@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { AstroReportRecord, AstroReportSection, UserProfile } from '../src/types';
 import {
+  createReportAfterPaymentSuccess,
   downloadAstroReportPdf,
   fetchAstroReport,
   fetchMyAstroReports,
@@ -67,6 +68,9 @@ const PremiumAstroReports: React.FC<PremiumAstroReportsProps> = ({
   onRequireGoogleLink,
   onSaveRequiredProfile: _onSaveRequiredProfile,
 }) => {
+  const normalizedEmail = (userEmail || '').trim().toLowerCase();
+  const isSuperAdmin =
+    normalizedEmail === '3dcafe.buddika@gmail.com' || normalizedEmail === '3dcafe.buddika@gmal.com';
   const [flowStep, setFlowStep] = useState<FlowStep>('closed');
   const [reports, setReports] = useState<AstroReportRecord[]>([]);
   const [loadingReports, setLoadingReports] = useState(true);
@@ -153,6 +157,21 @@ const PremiumAstroReports: React.FC<PremiumAstroReportsProps> = ({
     } catch (nextError: any) {
       setPendingOpenAfterAuth(false);
       setError(nextError?.message || 'Google account linking failed.');
+    } finally {
+      setActionLoading(false);
+    }
+  };
+
+  const handleStartAdminReport = async () => {
+    if (!userId) return;
+    setActionLoading(true);
+    setError(null);
+    try {
+      const result = await createReportAfterPaymentSuccess(userId, profile || null);
+      setFlowStep('closed');
+      window.location.href = `/payment-success?reportId=${encodeURIComponent(result.report.id)}`;
+    } catch (nextError: any) {
+      setError(nextError?.message || 'Admin report request could not be started.');
     } finally {
       setActionLoading(false);
     }
@@ -413,8 +432,18 @@ const PremiumAstroReports: React.FC<PremiumAstroReportsProps> = ({
                     </button>
                   </div>
                 )}
-                <div className="sticky bottom-0 -mx-2 bg-gradient-to-t from-[#f4fbff] via-[#f4fbff] to-transparent px-2 pt-5">
-                  <StripeCheckoutButton label="Pay with Stripe" customerEmail={userEmail} />
+                <div className="sticky bottom-0 -mx-2 space-y-3 bg-gradient-to-t from-[#f4fbff] via-[#f4fbff] to-transparent px-2 pt-5">
+                  {isSuperAdmin && (
+                    <button
+                      type="button"
+                      onClick={() => void handleStartAdminReport()}
+                      disabled={actionLoading}
+                      className="w-full rounded-full bg-emerald-600 px-6 py-4 text-sm font-black text-white shadow-lg shadow-emerald-200 disabled:opacity-70"
+                    >
+                      {actionLoading ? 'Please wait...' : 'Start Report (Super Admin - No Payment)'}
+                    </button>
+                  )}
+                  {!isSuperAdmin && <StripeCheckoutButton label="Pay with Stripe" customerEmail={userEmail} />}
                 </div>
               </div>
             )}
