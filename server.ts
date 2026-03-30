@@ -59,15 +59,28 @@ const isSuperAdminEmail = (email: unknown) => {
   return normalized ? SUPER_ADMIN_EMAILS.has(normalized) : false;
 };
 
-const createStripeCheckoutSession = async (customerEmail?: string | null) => {
+const createStripeCheckoutSession = async (input?: {
+  customerEmail?: string | null;
+  reportId?: string;
+  orderId?: string;
+}) => {
   const body = new URLSearchParams();
   body.set('mode', 'payment');
   body.set('line_items[0][price]', STRIPE_PRICE_WISHWAYA_PRO);
   body.set('line_items[0][quantity]', '1');
-  body.set('success_url', `${APP_URL}/payment-success`);
-  body.set('cancel_url', `${APP_URL}/payment-cancel`);
-  if (customerEmail) {
-    body.set('customer_email', customerEmail);
+  if (input?.reportId) {
+    body.set('success_url', `${APP_URL}/payment-success?reportId=${encodeURIComponent(input.reportId)}&orderId=${encodeURIComponent(input.orderId || '')}&session_id={CHECKOUT_SESSION_ID}`);
+    body.set('cancel_url', `${APP_URL}/payment-cancel?reportId=${encodeURIComponent(input.reportId)}`);
+    body.set('metadata[reportId]', input.reportId);
+  } else {
+    body.set('success_url', `${APP_URL}/payment-success`);
+    body.set('cancel_url', `${APP_URL}/payment-cancel`);
+  }
+  if (input?.orderId) {
+    body.set('metadata[orderId]', input.orderId);
+  }
+  if (input?.customerEmail) {
+    body.set('customer_email', input.customerEmail);
   }
 
   const response = await fetch('https://api.stripe.com/v1/checkout/sessions', {
@@ -157,7 +170,7 @@ process.on('unhandledRejection', (reason, promise) => {
 
 // Middleware
 app.use(cors());
-app.use(bodyParser.json());
+app.use(bodyParser.json({ limit: '20mb' }));
 
 // Data Storage
 // In Cloud Run (production), use /tmp as it's the only writable path.
@@ -884,13 +897,35 @@ app.post('/api/create-checkout-session', async (req, res) => {
       return res.status(500).json({ error: 'Stripe environment variables are missing' });
     }
 
+    const userId = String(req.body?.userId || '').trim();
+    if (!userId) {
+      return res.status(400).json({ error: 'userId is required' });
+    }
+
+    const profile = req.body?.profile || null;
     const customerEmail =
       typeof req.body?.customerEmail === 'string' && req.body.customerEmail.trim()
         ? req.body.customerEmail.trim()
         : null;
 
-    const session = await createStripeCheckoutSession(customerEmail);
+    const created = premiumAstroReportEngine.createOrder({ userId, profile });
+    const session = await createStripeCheckoutSession({
+      customerEmail,
+      reportId: created.report.id,
+      orderId: created.order.id,
+    });
+    premiumAstroReportEngine.attachStripeCheckout({
+      orderId: created.order.id,
+      reportId: created.report.id,
+      checkoutUrl: session.url || null,
+      sessionId: session.id || null,
+      stripePriceId: STRIPE_PRICE_WISHWAYA_PRO,
+      displayAmount: null,
+      localDisplayAmount: 'Rs. 300/-',
+    });
     res.status(201).json({
+      reportId: created.report.id,
+      orderId: created.order.id,
       checkoutUrl: session.url || null,
       sessionId: session.id || null,
     });
@@ -1125,12 +1160,21 @@ app.post('/api/stripe/consultant-webhook', (req, res) => {
 
 app.post('/api/astro-reports/payment-success-create', (req, res) => {
   try {
-    const { userId, profile } = req.body || {};
+    const { userId, profile, reportId, orderId, sessionId } = req.body || {};
     if (!userId) {
       return res.status(400).json({ error: 'userId is required' });
     }
 
-    const result = premiumAstroReportEngine.createBackgroundReportFromProfile(userId, profile || null);
+    let result;
+    if (reportId && orderId) {
+      premiumAstroReportEngine.confirmStripePayment(String(orderId), String(sessionId || `pay_${Date.now()}`));
+      result = {
+        report: premiumAstroReportEngine.getReport(String(reportId), String(userId)),
+        reused: false,
+      };
+    } else {
+      result = premiumAstroReportEngine.createBackgroundReportFromProfile(userId, profile || null);
+    }
     res.status(201).json(result);
   } catch (error: any) {
     console.error('[astro-report] payment success create failed', error);

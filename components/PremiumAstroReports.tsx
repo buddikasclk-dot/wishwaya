@@ -443,7 +443,16 @@ const PremiumAstroReports: React.FC<PremiumAstroReportsProps> = ({
                       {actionLoading ? 'Please wait...' : 'Start Report (Super Admin - No Payment)'}
                     </button>
                   )}
-                  {!isSuperAdmin && <StripeCheckoutButton label="Pay with Stripe" customerEmail={userEmail} />}
+                  {!isSuperAdmin && (
+                    <StripeCheckoutButton
+                      label="Pay with Stripe"
+                      customerEmail={userEmail}
+                      payload={{
+                        userId,
+                        profile,
+                      }}
+                    />
+                  )}
                 </div>
               </div>
             )}

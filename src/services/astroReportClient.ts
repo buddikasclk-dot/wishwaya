@@ -98,13 +98,27 @@ export const fetchMyAstroReports = async (userId: string): Promise<AstroReportRe
   return data as AstroReportRecord[];
 };
 
-export const createReportAfterPaymentSuccess = async (userId: string, profile: UserProfile | null) => {
+export const createReportAfterPaymentSuccess = async (
+  userId: string,
+  profile: UserProfile | null,
+  options?: {
+    reportId?: string | null;
+    orderId?: string | null;
+    sessionId?: string | null;
+  }
+) => {
   const response = await fetch('/api/astro-reports/payment-success-create', {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
     },
-    body: JSON.stringify({ userId, profile }),
+    body: JSON.stringify({
+      userId,
+      profile,
+      reportId: options?.reportId || null,
+      orderId: options?.orderId || null,
+      sessionId: options?.sessionId || null,
+    }),
   });
   const data = await response.json().catch(() => null);
   if (!response.ok) {

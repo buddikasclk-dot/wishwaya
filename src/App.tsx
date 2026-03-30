@@ -512,13 +512,22 @@ const PaymentSuccessPage: React.FC<{ userId: string }> = ({ userId }) => {
       try {
         const savedProfile = localStorage.getItem(LOCAL_PROFILE_KEY);
         const parsedProfile = savedProfile ? (JSON.parse(savedProfile) as UserProfile) : null;
-        const existingReportId =
+        const searchParams =
           typeof window !== 'undefined'
-            ? new URLSearchParams(window.location.search).get('reportId')
+            ? new URLSearchParams(window.location.search)
             : null;
-        const report = existingReportId
+        const existingReportId = searchParams?.get('reportId') || null;
+        const existingOrderId = searchParams?.get('orderId') || null;
+        const sessionId = searchParams?.get('session_id') || null;
+        const report = existingReportId && !existingOrderId
           ? { id: existingReportId }
-          : (await createReportAfterPaymentSuccess(userId, parsedProfile)).report;
+          : (
+              await createReportAfterPaymentSuccess(userId, parsedProfile, {
+                reportId: existingReportId,
+                orderId: existingOrderId,
+                sessionId,
+              })
+            ).report;
         const requirements = await fetchAstroReportRequirements(report.id, userId, parsedProfile);
 
         if (cancelled) return;
