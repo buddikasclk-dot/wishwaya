@@ -190,8 +190,10 @@ const PaymentSuccessPage: React.FC<{ userId: string }> = ({ userId }) => {
   const [cameraStarting, setCameraStarting] = useState(false);
   const [cameraCapturing, setCameraCapturing] = useState(false);
   const [cameraError, setCameraError] = useState<string | null>(null);
+  const [cameraNotice, setCameraNotice] = useState<string | null>(null);
   const [generalError, setGeneralError] = useState<string | null>(null);
   const [capturedImage, setCapturedImage] = useState<string | null>(null);
+  const [capturedImageNeedsFetch, setCapturedImageNeedsFetch] = useState(false);
   const [palmQuality, setPalmQuality] = useState<{
     width: number;
     height: number;
@@ -214,6 +216,21 @@ const PaymentSuccessPage: React.FC<{ userId: string }> = ({ userId }) => {
 
   const preferredHandLabel = formData.gender === 'female' ? 'Left Hand' : 'Right Hand';
   const preferredHandSinhala = formData.gender === 'female' ? 'වම් අත' : 'දකුණු අත';
+
+  const getPalmQualityWarnings = (quality: {
+    width: number;
+    height: number;
+    brightness: number;
+    contrast: number;
+    sharpness: number;
+  }) => {
+    const warnings: string[] = [];
+    if (quality.width < 600 || quality.height < 800) warnings.push('Resolution is low, so palm lines may be less accurate.');
+    if (quality.brightness < 45) warnings.push('Lighting is dark. A brighter photo will improve analysis.');
+    if (quality.contrast < 18) warnings.push('Palm lines are low contrast. Try keeping the full palm clear against the background.');
+    if (quality.sharpness < 12) warnings.push('The image looks a little blurry. Holding steady will improve the reading.');
+    return warnings;
+  };
 
   const stopCamera = () => {
     const stream =
@@ -395,6 +412,7 @@ const PaymentSuccessPage: React.FC<{ userId: string }> = ({ userId }) => {
   const startCamera = async () => {
     if (cameraStarting) return;
     setCameraError(null);
+    setCameraNotice(null);
     setCameraStarting(true);
     try {
       const stream = await getCameraStream();
@@ -431,6 +449,7 @@ const PaymentSuccessPage: React.FC<{ userId: string }> = ({ userId }) => {
 
     setCameraCapturing(true);
     setCameraError(null);
+    setCameraNotice(null);
 
     try {
       canvasRef.current.width = videoRef.current.videoWidth;
@@ -441,26 +460,16 @@ const PaymentSuccessPage: React.FC<{ userId: string }> = ({ userId }) => {
 
       const quality = analyzePalmQuality(canvasRef.current);
 
-      if (quality.width < 600 || quality.height < 800) {
-        setCameraError('Palm image resolution is too small. Please move closer and capture again.');
-        return;
-      }
-      if (quality.brightness < 45) {
-        setCameraError('Palm image is too dark. Please capture again with better lighting.');
-        return;
-      }
-      if (quality.contrast < 18) {
-        setCameraError('Palm image contrast is too low. Please keep the full palm clearly visible.');
-        return;
-      }
-      if (quality.sharpness < 12) {
-        setCameraError('Palm image looks blurry. Please hold steady and capture again.');
-        return;
-      }
-
       const imageDataUrl = await canvasToDataUrl(canvasRef.current);
       setCapturedImage(imageDataUrl);
+      setCapturedImageNeedsFetch(false);
       setPalmQuality(quality);
+      const warnings = getPalmQualityWarnings(quality);
+      setCameraNotice(
+        warnings.length
+          ? `Palm photo captured. ${warnings[0]} You can still submit, or retake for a clearer reading.`
+          : 'Palm photo captured successfully and is ready for report generation.'
+      );
       stopCamera();
     } catch (error) {
       console.error('Palm capture failed', error);
@@ -468,6 +477,32 @@ const PaymentSuccessPage: React.FC<{ userId: string }> = ({ userId }) => {
     } finally {
       setCameraCapturing(false);
     }
+  };
+
+  const resolveCapturedImageForSubmit = async () => {
+    if (!capturedImage) return null;
+    if (!capturedImageNeedsFetch && capturedImage.startsWith('data:')) {
+      return capturedImage;
+    }
+
+    const response = await fetch(capturedImage);
+    if (!response.ok) {
+      throw new Error('Saved palm image could not be loaded. Please capture it again.');
+    }
+
+    const blob = await response.blob();
+    return await new Promise<string>((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onloadend = () => {
+        if (typeof reader.result === 'string') {
+          resolve(reader.result);
+        } else {
+          reject(new Error('Saved palm image could not be prepared for submission.'));
+        }
+      };
+      reader.onerror = () => reject(reader.error || new Error('Saved palm image could not be prepared for submission.'));
+      reader.readAsDataURL(blob);
+    });
   };
 
   useEffect(() => {
@@ -500,7 +535,10 @@ const PaymentSuccessPage: React.FC<{ userId: string }> = ({ userId }) => {
         });
 
         if (requirements.prefilled.palmImageUrl) {
-          setCapturedImage(requirements.prefilled.palmImageUrl);
+          setCapturedImage(`${requirements.prefilled.palmImageUrl}?userId=${encodeURIComponent(userId)}`);
+          setCapturedImageNeedsFetch(true);
+          setPalmQuality(requirements.prefilled.palmQuality || null);
+          setCameraNotice('A previously saved palm photo is attached to this request. You can submit it as-is or retake it.');
         }
 
         if (['queued', 'generating', 'pdf_generating', 'completed'].includes(requirements.status)) {
@@ -543,7 +581,7 @@ const PaymentSuccessPage: React.FC<{ userId: string }> = ({ userId }) => {
 
   const handleSubmit = async () => {
     if (!reportId) return;
-    if (!capturedImage || !palmQuality) {
+    if (!capturedImage) {
       setGeneralError('Please capture a clear palm photo before submitting.');
       return;
     }
@@ -553,6 +591,12 @@ const PaymentSuccessPage: React.FC<{ userId: string }> = ({ userId }) => {
 
     try {
       updateProfileCache();
+      const palmImageBase64 = await resolveCapturedImageForSubmit();
+      if (!palmImageBase64) {
+        throw new Error('Palm image is missing. Please capture it again.');
+      }
+      const palmImageMimeType = palmImageBase64.startsWith('data:image/png') ? 'image/png' : 'image/jpeg';
+
       await submitAstroReportInputs(reportId, {
         userId,
         profile: null,
@@ -562,9 +606,15 @@ const PaymentSuccessPage: React.FC<{ userId: string }> = ({ userId }) => {
         birthPlace: formData.birthPlace,
         gender: formData.gender,
         preferredLanguage: 'si',
-        palmImageBase64: capturedImage,
-        palmImageMimeType: 'image/jpeg',
-        palmQuality,
+        palmImageBase64,
+        palmImageMimeType,
+        palmQuality: palmQuality || {
+          width: 1200,
+          height: 1600,
+          brightness: 60,
+          contrast: 24,
+          sharpness: 18,
+        },
       });
       setStage('submitted');
       setMessage('Your premium report request has been submitted. Wishwaya is now generating the full Sinhala report in the background.');
@@ -714,6 +764,7 @@ const PaymentSuccessPage: React.FC<{ userId: string }> = ({ userId }) => {
                 )}
               </div>
               {cameraError && <p className="mt-4 text-sm text-red-500">{cameraError}</p>}
+              {cameraNotice && !cameraError && <p className="mt-4 text-sm text-amber-700">{cameraNotice}</p>}
             </div>
 
             {generalError && (
@@ -760,6 +811,7 @@ const PaymentSuccessPage: React.FC<{ userId: string }> = ({ userId }) => {
           <div className="absolute left-0 right-0 top-8 px-6 text-center text-white">
             <p className="text-lg font-black">{formData.gender === 'female' ? 'Capture Left Palm' : 'Capture Right Palm'}</p>
             <p className="mt-2 text-sm leading-6 text-white/85">Keep the full {preferredHandLabel.toLowerCase()} visible, fingers open naturally, and use bright lighting.</p>
+            {cameraError && <p className="mt-3 text-sm font-semibold text-red-300">{cameraError}</p>}
           </div>
           <div className="absolute bottom-10 left-0 right-0 flex items-center justify-center gap-6">
             <button

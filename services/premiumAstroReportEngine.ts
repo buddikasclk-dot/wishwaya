@@ -13,6 +13,7 @@ import {
   AstroReportRequirements,
   AstroReportSection,
   AstroReportStatus,
+  PalmAnalysisResult,
   UserProfile,
 } from '../src/types.ts';
 
@@ -631,12 +632,6 @@ export class PremiumAstroReportEngine {
     if (!payload.birthPlace.trim()) errors.push('Birth place is required');
     if (!payload.palmImageBase64) errors.push('Palm image is required');
 
-    const { width, height, brightness, contrast, sharpness } = payload.palmQuality;
-    if (width < 600 || height < 800) errors.push('Palm image resolution is too small');
-    if (brightness < 45) errors.push('Palm image is too dark');
-    if (contrast < 18) errors.push('Palm image contrast is too low');
-    if (sharpness < 12) errors.push('Palm image is too blurry');
-
     if (errors.length) {
       console.warn('[astro-report] input validation failed', errors);
       throw new Error(errors[0]);
@@ -690,7 +685,7 @@ export class PremiumAstroReportEngine {
       report.updatedAt = new Date().toISOString();
       this.upsertReport(report);
 
-      const deterministicData = this.buildDeterministicSnapshot(report.inputSnapshot);
+      const deterministicData = await this.buildDeterministicSnapshot(report, report.inputSnapshot);
       report.astrologyDataJson = deterministicData;
       report.updatedAt = new Date().toISOString();
       this.upsertReport(report);
@@ -723,7 +718,7 @@ export class PremiumAstroReportEngine {
     }
   }
 
-  private buildDeterministicSnapshot(input: AstroReportInputSnapshot): AstroDeterministicData {
+  private async buildDeterministicSnapshot(report: AstroReportRecord, input: AstroReportInputSnapshot): Promise<AstroDeterministicData> {
     const baseProfile = calculateBirthProfile(input.dateOfBirth, input.timeOfBirth, input.birthPlace);
     const seed = Math.abs(hashCode(`${input.dateOfBirth}|${input.timeOfBirth}|${input.birthPlace}|${input.fullName}`));
     const signs = [
@@ -760,6 +755,8 @@ export class PremiumAstroReportEngine {
       focus: focuses[index],
     }));
 
+    const palmAiAnalysis = await this.analyzePalmImage(report, input.gender);
+
     return {
       lagna: baseProfile.lagna || baseProfile.rashi || 'මකර',
       rashi: baseProfile.janmaRashiya || baseProfile.rashi || 'මකර',
@@ -786,11 +783,65 @@ export class PremiumAstroReportEngine {
         input.palmQuality.sharpness > 20 ? 'රේඛා පැහැදිලිව පෙනේ.' : 'අත් රේඛා මධ්‍යස්ථ ලෙස පෙනේ.',
         input.palmQuality.brightness > 70 ? 'ආලෝක තත්ත්වය හොඳ බැවින් නිරීක්ෂණ විශ්වාසය වැඩිය.' : 'ඡායාරූප ආලෝකය මධ්‍යස්ථය.',
       ],
+      palmAiAnalysis,
       calculationNotes: [
         'ලග්නය, නක්ෂත්‍රය සහ පාදය උපන් තොරතුරු මත backend මඟින් සකස් කර ඇත.',
         'උසස් දශා, යෝග සහ ග්‍රහ සංචාර කොටස් සම්පූර්ණ ගණිත පද්ධතියක් නොමැති නිසා hybrid explanation ආකාරයෙන් සකස් කර ඇත.',
       ],
     };
+  }
+
+  private getPalmImageFilePath(report: AstroReportRecord) {
+    if (!report.palmImageUrl) return null;
+    const filePath = path.join(this.uploadsDir, path.basename(report.palmImageUrl));
+    return fs.existsSync(filePath) ? filePath : null;
+  }
+
+  private async analyzePalmImage(report: AstroReportRecord, gender: UserProfile['gender']): Promise<PalmAnalysisResult | null> {
+    if (!this.ai) return null;
+
+    const filePath = this.getPalmImageFilePath(report);
+    if (!filePath) return null;
+
+    const mimeType = path.extname(filePath).toLowerCase() === '.png' ? 'image/png' : 'image/jpeg';
+    const fallback: PalmAnalysisResult = {
+      archetype: 'අභ්‍යන්තර ශක්තිය සහ සංයමය මූලික කරගත් ස්වභාවය',
+      handShape: 'අත් හැඩය තුළ ස්ථාවර බව, වගකීම සහ ප්‍රායෝගික සිතීමේ ලක්ෂණ පෙනේ.',
+      heartLineDetail: 'හද රේඛාව සම්බන්ධතා තුළ ගැඹුරු හැඟීම්, විශ්වාසය සහ සෙමින් විවෘත වන හෘදය පෙන්වයි.',
+      headLineDetail: 'මනෝ රේඛාව විමසිලිමත් තීරණ, අභ්‍යන්තර විශ්ලේෂණය සහ සැලසුම්ශීලී චින්තනය පෙන්නුම් කරයි.',
+      lifeLineDetail: 'ජීව රේඛාව අභ්‍යන්තර ශක්තිය, ධෛර්යය සහ ක්‍රමයෙන් වර්ධනය වන ජීවන ගමන් මඟක් පෙන්වයි.',
+      fateLineDetail: 'වාසනා රේඛාව වේගයෙන් නොව, නියත කැපවීමෙන් ගොඩනැගෙන කාර්ය මාර්ගයක් පෙන්වයි.',
+      mountsAnalysis: 'ග්‍රහ මණ්ඩල බලපෑම් සලකා බැලූ විට උත්සාහය, ඉවසීම සහ ප්‍රායෝගික අවබෝධය අතර සමතුලිතතාවයක් පෙනේ.',
+      specialMarkings: 'විශේෂ සලකුණු මධ්‍යස්ථ ලෙස පෙනෙන බැවින් අත් රේඛා කියවීම උපන් තොරතුරු සමඟ එකට බැලීම වඩා සුදුසුය.',
+      synthesisAdvice: 'අත් රේඛා, උපන් සටහන සහ වර්තමාන ජීවිත රටාව එකට සම්බන්ධ කර බැලීමෙන් වඩා නිවැරදි මඟපෙන්වීමක් ලැබේ.',
+    };
+
+    try {
+      const base64Image = fs.readFileSync(filePath).toString('base64');
+      const response = await this.ai.models.generateContent({
+        model: 'gemini-3-flash-preview',
+        contents: [
+          {
+            inlineData: {
+              data: base64Image,
+              mimeType,
+            },
+          },
+          {
+            text: `Analyze this palm image according to Sri Lankan palmistry tradition for a ${gender}. Return JSON only with archetype, handShape, heartLineDetail, headLineDetail, lifeLineDetail, fateLineDetail, mountsAnalysis, specialMarkings, synthesisAdvice. Write all values in Sinhala.`,
+          },
+        ],
+        config: {
+          responseMimeType: 'application/json',
+        },
+      });
+
+      const parsed = safeJsonParse<Partial<PalmAnalysisResult>>(response.text || '', fallback);
+      return { ...fallback, ...parsed };
+    } catch (error) {
+      console.warn('[astro-report] palm image analysis fallback', error);
+      return fallback;
+    }
   }
 
   private async buildFinalReport(report: AstroReportRecord, deterministicData: AstroDeterministicData): Promise<AstroFullReportJson> {
@@ -922,7 +973,9 @@ ${fallbackContent}
       healthLifestyleGuidance: `ශරීරයට වඩා මනස මත පීඩනය එකතු වන ස්වභාවය මෙහි පෙනේ. නින්ද, ජල පාන, නියමිත ආහාර වේලාවන් සහ සැහැල්ලු ව්‍යායාම ඔබගේ ශක්තිය ස්ථාවර කරයි. අධික තණ්හාවෙන් වැඩ කිරීම හෝ කල්පනා කිරීම නිසා හිසරදය, උදර නොසන්සුන්තාව හෝ වෙහෙස දැනිය හැකි බැවින් ජීවන රටාව පාලනය කිරීම වැදගත් වේ.`,
       dashaTimePeriodAnalysis: `දශා විග්‍රහය අනුව වර්තමාන කාලය ඔබගේ අභ්‍යන්තර හැඩගැස්වීම, මුදල් පාලනය සහ ජීවිත ප්‍රමුඛතා නැවත සකස් කිරීම ඉල්ලා සිටියි. සමහර අවස්ථාවන් ප්‍රමාදයකින් හෝ වගකීම් වැඩි වීමෙන් පෙනිය හැකි නමුත්, මේවා දිගුකාලීන ශක්තිමත් පදනමකට මඟ පාදයි. හොඳ කාලයන් ඔබ සැලසුම සහ අවධානය සමඟ කටයුතු කරන විට වේගයෙන් ප්‍රයෝජනවත් වනු ඇත.`,
       yogasDoshasPlanetaryInfluences: `මෙම කොටස hybrid mode එකෙන් සකස් කර ඇත. ඔබගේ සටහනේ ශක්තිය වැඩිපුර පෙන්නුම් කරන්නේ ස්ථාවර කැපවීම, ශිල්පමය සැලසුම සහ නිහතමානී වර්ධනය තුළය. කෙසේ වෙතත්, අතිවිමර්ශනය, තීරණ ප්‍රමාද වීම සහ සම්බන්ධතා තුළ මනසින් දුරස් වීම ප්‍රතිකූල ලෙස පෙනිය හැක. එබැවින් යෝග සහ දෝෂ යනුවෙන් දැක්වෙන බලපෑම් සම්පූර්ණ වශයෙන් භීතියට නොව, දැනුවත් වීමේ සලකුණු ලෙස භාවිත කරන්න.`,
-      palmAnalysisReport: `අත් රේඛා නිරීක්ෂණය ${deterministicData.palmObservationSummary?.join(' ')} ජීව රේඛාව සහ මනෝ රේඛාව අර්ථදක්වන්නේ ඔබට අභ්‍යන්තර ශක්තියක් සහ සෙමින් නමුත් ගැඹුරු ලෙස තීරණ ගැනීමේ රටාවක් ඇති බවයි. හද රේඛාව සම්බන්ධතා තුළ ගැඹුරු විශ්වාසයක් සහ ආරක්ෂාවක් කැමති බව පෙන්වයි. ජෝතිශ්‍ය සටහන සමඟ බැලූ විට, ඔබගේ හෘදය සහ බුද්ධිය අතර සමතුලිතතාවය ඔබගේ ප්‍රධාන වර්ධන පාඨය බව පෙනේ.`,
+      palmAnalysisReport: deterministicData.palmAiAnalysis
+        ? `අත් රේඛා නිරීක්ෂණය ${deterministicData.palmObservationSummary?.join(' ')} ${deterministicData.palmAiAnalysis.handShape} ${deterministicData.palmAiAnalysis.heartLineDetail} ${deterministicData.palmAiAnalysis.headLineDetail} ${deterministicData.palmAiAnalysis.lifeLineDetail} ${deterministicData.palmAiAnalysis.fateLineDetail} ${deterministicData.palmAiAnalysis.mountsAnalysis} ${deterministicData.palmAiAnalysis.specialMarkings} ${deterministicData.palmAiAnalysis.synthesisAdvice}`
+        : `අත් රේඛා නිරීක්ෂණය ${deterministicData.palmObservationSummary?.join(' ')} ජීව රේඛාව සහ මනෝ රේඛාව අර්ථදක්වන්නේ ඔබට අභ්‍යන්තර ශක්තියක් සහ සෙමින් නමුත් ගැඹුරු ලෙස තීරණ ගැනීමේ රටාවක් ඇති බවයි. හද රේඛාව සම්බන්ධතා තුළ ගැඹුරු විශ්වාසයක් සහ ආරක්ෂාවක් කැමති බව පෙන්වයි. ජෝතිශ්‍ය සටහන සමඟ බැලූ විට, ඔබගේ හෘදය සහ බුද්ධිය අතර සමතුලිතතාවය ඔබගේ ප්‍රධාන වර්ධන පාඨය බව පෙනේ.`,
       upcomingNekathForUser: `ඔබට ගැළපෙන ඉදිරි නැකත් කවුළු තෝරා ගැනීමේදී ව්‍යාපාර, ගමන් සහ නව ආරම්භයන් සඳහා අඩියෙන් අඩිය සැලසුමක් භාවිත කරන්න. ${deterministicData.upcomingNekathLogic?.join(' ')} මේ කාලයන් තුළ මුදල් සැලසුම්, ලිපි ලේඛන, හෝ නිවස/රැකියාව සම්බන්ධ කටයුතු ප්‍රමුඛතා අනුව සකස් කිරීම හොඳය. කලබල තීරණ, අවිධිමත් ගිවිසුම් සහ හදිසි වියදම් වලින් වළකින්න.`,
       pastLifeLine: `පසුගිය ආත්ම රේඛාව මෙම වාර්තාවේ ආධ්‍යාත්මික-අර්ථකථන කොටසකි. එයින් පෙනෙන්නේ ඔබ අතීතයෙන් ගෙනෙන වගකීම් බරක්, අන් අය වෙනුවෙන් වැඩිපුර සිතන ගතියක් සහ ශික්ෂණය හරහා වර්ධනය වීමට ඇති කර්ම පාඩම් බවයි. වර්තමාන ජීවිතයට එයින් ලැබෙන ආරාධනය නම් ඔබගේ සීමා පැහැදිලි කරගෙන, සේවය සහ ස්වයං-සුරක්ෂිතභාවය අතර සමතුලිතතාවයක් තැනීමය.`,
       recommendedGemsToWear: `සුදුසු මැණික් තෝරා ගැනීමේදී ශනි, ගුරු සහ මනස ස්ථාවර කරන වර්ණ බල සලකා බැලිය යුතුය. ${deterministicData.recommendedGemLogic?.join(' ')} ඔබට සුදුසු මැණික් භාවිතයට පෙර ශරීර ප්‍රතිචාර, ආගමික පුරුදු සහ දින/අත/ඇඟිලි සම්බන්ධ නීති අනුව පරීක්ෂා කරගැනීම වඩා සුදුසුය. නොගැළපෙන මැණික් වඩාත් ආවේගශීලී බවක් හෝ අසහනයක් දැනිය හැකි බැවින් අවධානයෙන් කටයුතු කරන්න.`,

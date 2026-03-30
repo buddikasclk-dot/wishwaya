@@ -332,6 +332,7 @@ export interface AstroDeterministicData {
   recommendedGemLogic?: string[];
   remedyBaseRules?: string[];
   palmObservationSummary?: string[];
+  palmAiAnalysis?: PalmAnalysisResult | null;
   calculationNotes: string[];
 }
 
