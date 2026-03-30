@@ -188,6 +188,7 @@ const PaymentSuccessPage: React.FC<{ userId: string }> = ({ userId }) => {
   const [submitting, setSubmitting] = useState(false);
   const [cameraOpen, setCameraOpen] = useState(false);
   const [cameraStarting, setCameraStarting] = useState(false);
+  const [cameraCapturing, setCameraCapturing] = useState(false);
   const [cameraError, setCameraError] = useState<string | null>(null);
   const [generalError, setGeneralError] = useState<string | null>(null);
   const [capturedImage, setCapturedImage] = useState<string | null>(null);
@@ -302,19 +303,37 @@ const PaymentSuccessPage: React.FC<{ userId: string }> = ({ userId }) => {
     throw lastError || new Error('Camera could not be started');
   };
 
-  const analyzePalmQuality = (canvas: HTMLCanvasElement) => {
-    const context = canvas.getContext('2d');
-    if (!context) {
+  const analyzePalmQuality = (sourceCanvas: HTMLCanvasElement) => {
+    const sampleCanvas = document.createElement('canvas');
+    const maxSampleWidth = 320;
+    const scale = Math.min(1, maxSampleWidth / sourceCanvas.width);
+    sampleCanvas.width = Math.max(1, Math.round(sourceCanvas.width * scale));
+    sampleCanvas.height = Math.max(1, Math.round(sourceCanvas.height * scale));
+
+    const sampleContext = sampleCanvas.getContext('2d', { willReadFrequently: true });
+    if (!sampleContext) {
       return {
-        width: canvas.width,
-        height: canvas.height,
+        width: sourceCanvas.width,
+        height: sourceCanvas.height,
         brightness: 0,
         contrast: 0,
         sharpness: 0,
       };
     }
 
-    const { data, width, height } = context.getImageData(0, 0, canvas.width, canvas.height);
+    sampleContext.drawImage(sourceCanvas, 0, 0, sampleCanvas.width, sampleCanvas.height);
+    const context = sampleCanvas.getContext('2d', { willReadFrequently: true });
+    if (!context) {
+      return {
+        width: sourceCanvas.width,
+        height: sourceCanvas.height,
+        brightness: 0,
+        contrast: 0,
+        sharpness: 0,
+      };
+    }
+
+    const { data, width, height } = context.getImageData(0, 0, sampleCanvas.width, sampleCanvas.height);
     let brightnessTotal = 0;
     const luminanceValues: number[] = [];
 
@@ -343,12 +362,34 @@ const PaymentSuccessPage: React.FC<{ userId: string }> = ({ userId }) => {
     const sharpness = Math.min(100, Math.round((edgeTotal / ((width - 1) * (height - 1) * 2 * 255)) * 100));
 
     return {
-      width,
-      height,
+      width: sourceCanvas.width,
+      height: sourceCanvas.height,
       brightness: Math.round((mean / 255) * 100),
       contrast,
       sharpness,
     };
+  };
+
+  const canvasToDataUrl = async (canvas: HTMLCanvasElement) => {
+    if (typeof canvas.toBlob === 'function') {
+      const blob = await new Promise<Blob | null>((resolve) => canvas.toBlob(resolve, 'image/jpeg', 0.9));
+      if (blob) {
+        return await new Promise<string>((resolve, reject) => {
+          const reader = new FileReader();
+          reader.onloadend = () => {
+            if (typeof reader.result === 'string') {
+              resolve(reader.result);
+            } else {
+              reject(new Error('Palm image conversion failed.'));
+            }
+          };
+          reader.onerror = () => reject(reader.error || new Error('Palm image conversion failed.'));
+          reader.readAsDataURL(blob);
+        });
+      }
+    }
+
+    return canvas.toDataURL('image/jpeg', 0.9);
   };
 
   const startCamera = async () => {
@@ -378,7 +419,8 @@ const PaymentSuccessPage: React.FC<{ userId: string }> = ({ userId }) => {
     void attachCurrentStreamToVideo();
   }, [cameraOpen]);
 
-  const capturePalm = () => {
+  const capturePalm = async () => {
+    if (cameraCapturing) return;
     if (!videoRef.current || !canvasRef.current) return;
     if (videoRef.current.videoWidth < 1 || videoRef.current.videoHeight < 1) {
       setCameraError('Camera preview is not ready yet. Please wait a second and try again.');
@@ -387,33 +429,45 @@ const PaymentSuccessPage: React.FC<{ userId: string }> = ({ userId }) => {
     const context = canvasRef.current.getContext('2d');
     if (!context) return;
 
-    canvasRef.current.width = videoRef.current.videoWidth;
-    canvasRef.current.height = videoRef.current.videoHeight;
-    context.drawImage(videoRef.current, 0, 0, canvasRef.current.width, canvasRef.current.height);
+    setCameraCapturing(true);
+    setCameraError(null);
 
-    const imageDataUrl = canvasRef.current.toDataURL('image/jpeg', 0.9);
-    const quality = analyzePalmQuality(canvasRef.current);
+    try {
+      canvasRef.current.width = videoRef.current.videoWidth;
+      canvasRef.current.height = videoRef.current.videoHeight;
+      context.drawImage(videoRef.current, 0, 0, canvasRef.current.width, canvasRef.current.height);
 
-    if (quality.width < 600 || quality.height < 800) {
-      setCameraError('Palm image resolution is too small. Please move closer and capture again.');
-      return;
-    }
-    if (quality.brightness < 45) {
-      setCameraError('Palm image is too dark. Please capture again with better lighting.');
-      return;
-    }
-    if (quality.contrast < 18) {
-      setCameraError('Palm image contrast is too low. Please keep the full palm clearly visible.');
-      return;
-    }
-    if (quality.sharpness < 12) {
-      setCameraError('Palm image looks blurry. Please hold steady and capture again.');
-      return;
-    }
+      await new Promise<void>((resolve) => window.setTimeout(resolve, 0));
 
-    setCapturedImage(imageDataUrl);
-    setPalmQuality(quality);
-    stopCamera();
+      const quality = analyzePalmQuality(canvasRef.current);
+
+      if (quality.width < 600 || quality.height < 800) {
+        setCameraError('Palm image resolution is too small. Please move closer and capture again.');
+        return;
+      }
+      if (quality.brightness < 45) {
+        setCameraError('Palm image is too dark. Please capture again with better lighting.');
+        return;
+      }
+      if (quality.contrast < 18) {
+        setCameraError('Palm image contrast is too low. Please keep the full palm clearly visible.');
+        return;
+      }
+      if (quality.sharpness < 12) {
+        setCameraError('Palm image looks blurry. Please hold steady and capture again.');
+        return;
+      }
+
+      const imageDataUrl = await canvasToDataUrl(canvasRef.current);
+      setCapturedImage(imageDataUrl);
+      setPalmQuality(quality);
+      stopCamera();
+    } catch (error) {
+      console.error('Palm capture failed', error);
+      setCameraError('Palm photo could not be captured. Please try again.');
+    } finally {
+      setCameraCapturing(false);
+    }
   };
 
   useEffect(() => {
@@ -642,20 +696,20 @@ const PaymentSuccessPage: React.FC<{ userId: string }> = ({ userId }) => {
                     <button
                       type="button"
                       onClick={() => void startCamera()}
-                      disabled={cameraStarting}
+                      disabled={cameraStarting || cameraCapturing}
                       className="rounded-full bg-slate-900 px-5 py-3 text-sm font-black text-white disabled:opacity-70"
                     >
-                      {cameraStarting ? 'Starting Camera...' : 'Retake Palm Photo'}
+                      {cameraStarting ? 'Starting Camera...' : cameraCapturing ? 'Capturing...' : 'Retake Palm Photo'}
                     </button>
                   </div>
                 ) : (
                   <button
                     type="button"
                     onClick={() => void startCamera()}
-                    disabled={cameraStarting}
+                    disabled={cameraStarting || cameraCapturing}
                     className="rounded-full bg-slate-900 px-5 py-3 text-sm font-black text-white disabled:opacity-70"
                   >
-                    {cameraStarting ? 'Starting Camera...' : 'Open Camera'}
+                    {cameraStarting ? 'Starting Camera...' : cameraCapturing ? 'Capturing...' : 'Open Camera'}
                   </button>
                 )}
               </div>
@@ -711,16 +765,18 @@ const PaymentSuccessPage: React.FC<{ userId: string }> = ({ userId }) => {
             <button
               type="button"
               onClick={() => stopCamera()}
+              disabled={cameraCapturing}
               className="rounded-full bg-white/20 px-5 py-3 text-sm font-black text-white backdrop-blur"
             >
               Cancel
             </button>
             <button
               type="button"
-              onClick={capturePalm}
-              className="flex h-20 w-20 items-center justify-center rounded-full border-4 border-white bg-white/20"
+              onClick={() => void capturePalm()}
+              disabled={cameraCapturing}
+              className="flex h-20 w-20 items-center justify-center rounded-full border-4 border-white bg-white/20 disabled:opacity-70"
             >
-              <span className="h-14 w-14 rounded-full bg-white" />
+              <span className={`h-14 w-14 rounded-full ${cameraCapturing ? 'bg-white/70' : 'bg-white'}`} />
             </button>
           </div>
           <canvas ref={canvasRef} className="hidden" />
