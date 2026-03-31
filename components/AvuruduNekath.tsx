@@ -84,7 +84,7 @@ const AvuruduNekath: React.FC = () => {
       <ResultLoadingScreen 
         isReady={true} 
         onComplete={handleComplete}
-        icon="🏮"
+        icon="☀️"
         title="අලුත් අවුරුදු නැකත් සකස් කරමින්..."
         subtitle="මෙය සකස් කිරීමට තත්පර 30ක් පමණ ගතවනු ඇත. කරුණාකර රැඳී සිටින්න."
         colorTheme="amber"

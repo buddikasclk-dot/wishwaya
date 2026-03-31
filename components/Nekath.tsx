@@ -56,7 +56,7 @@ const Nekath: React.FC<NekathProps> = ({ profile }) => {
       <ResultLoadingScreen 
         isReady={!loading} 
         onComplete={() => setShowLoading(false)}
-        icon="✨"
+        icon="🗓️"
         title="නැකත් ගණනය කරමින්..."
         subtitle="මෙය සකස් කිරීමට තත්පර 30ක් පමණ ගතවනු ඇත. කරුණාකර රැඳී සිටින්න."
         colorTheme="indigo"

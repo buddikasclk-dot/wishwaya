@@ -21,7 +21,7 @@ const INITIAL_CREDITS: ConsultantCredits = {
   can_chat: true,
 };
 
-const formatMessageWithBold = (text: string) => {
+const renderInlineFormatting = (text: string) => {
   const parts = text.split(/(\*\*[^*]+\*\*)/g);
   return parts.map((part, index) => {
     const isBold = part.startsWith('**') && part.endsWith('**');
@@ -35,6 +35,136 @@ const formatMessageWithBold = (text: string) => {
     return <React.Fragment key={index}>{part}</React.Fragment>;
   });
 };
+
+const normalizeAssistantText = (text: string) =>
+  String(text || '')
+    .replace(/\r/g, '')
+    .replace(/[ \t]+\n/g, '\n')
+    .replace(/\n{3,}/g, '\n\n')
+    .trim();
+
+const isBulletLine = (line: string) => /^[-*•]\s+/.test(line);
+const isNumberedLine = (line: string) => /^\d+\.\s+/.test(line);
+const isPanelLine = (line: string) => /^(Tip|Note|Remedy|Warning|Summary|Focus)\s*:/i.test(line);
+const isHeadingLine = (line: string) =>
+  /^\*\*[^*]+\*\*$/.test(line) || (/^[^.:]{3,60}:$/.test(line) && !isNumberedLine(line));
+
+const renderStructuredMessage = (text: string) => {
+  const lines = normalizeAssistantText(text).split('\n');
+  const blocks: React.ReactNode[] = [];
+  let index = 0;
+
+  while (index < lines.length) {
+    const line = lines[index].trim();
+
+    if (!line) {
+      index += 1;
+      continue;
+    }
+
+    if (isBulletLine(line)) {
+      const items: string[] = [];
+      while (index < lines.length && isBulletLine(lines[index].trim())) {
+        items.push(lines[index].trim().replace(/^[-*•]\s+/, ''));
+        index += 1;
+      }
+      blocks.push(
+        <ul key={`ul-${index}`} className="list-disc space-y-2 pl-5 marker:text-emerald-500">
+          {items.map((item, itemIndex) => (
+            <li key={itemIndex} className="pl-1 text-sm leading-7 text-slate-700">
+              {renderInlineFormatting(item)}
+            </li>
+          ))}
+        </ul>
+      );
+      continue;
+    }
+
+    if (isNumberedLine(line)) {
+      const items: string[] = [];
+      while (index < lines.length && isNumberedLine(lines[index].trim())) {
+        items.push(lines[index].trim().replace(/^\d+\.\s+/, ''));
+        index += 1;
+      }
+      blocks.push(
+        <ol key={`ol-${index}`} className="list-decimal space-y-2 pl-5 marker:font-black marker:text-indigo-600">
+          {items.map((item, itemIndex) => (
+            <li key={itemIndex} className="pl-1 text-sm leading-7 text-slate-700">
+              {renderInlineFormatting(item)}
+            </li>
+          ))}
+        </ol>
+      );
+      continue;
+    }
+
+    if (isPanelLine(line)) {
+      const [label, ...rest] = line.split(':');
+      blocks.push(
+        <div
+          key={`panel-${index}`}
+          className="rounded-2xl border border-emerald-100 bg-emerald-50/80 px-4 py-3 text-sm leading-7 text-emerald-900"
+        >
+          <span className="mr-1 text-[10px] font-black uppercase tracking-[0.16em] text-emerald-700">
+            {label}
+          </span>
+          <span>{renderInlineFormatting(rest.join(':').trim())}</span>
+        </div>
+      );
+      index += 1;
+      continue;
+    }
+
+    if (isHeadingLine(line)) {
+      const headingText = line.replace(/^\*\*|\*\*$/g, '').replace(/:$/, '');
+      blocks.push(
+        <h4 key={`heading-${index}`} className="pt-1 text-[13px] font-black uppercase tracking-[0.16em] text-slate-800">
+          {headingText}
+        </h4>
+      );
+      index += 1;
+      continue;
+    }
+
+    const paragraphLines = [line];
+    index += 1;
+    while (
+      index < lines.length &&
+      lines[index].trim() &&
+      !isBulletLine(lines[index].trim()) &&
+      !isNumberedLine(lines[index].trim()) &&
+      !isPanelLine(lines[index].trim()) &&
+      !isHeadingLine(lines[index].trim())
+    ) {
+      paragraphLines.push(lines[index].trim());
+      index += 1;
+    }
+
+    blocks.push(
+      <p key={`p-${index}`} className="text-sm leading-7 text-slate-700">
+        {renderInlineFormatting(paragraphLines.join(' '))}
+      </p>
+    );
+  }
+
+  return <div className="space-y-3">{blocks}</div>;
+};
+
+const ThinkingBubble = () => (
+  <div className="rounded-[1.5rem] border border-slate-200 bg-white px-4 py-3 shadow-sm">
+    <div className="flex items-center gap-3">
+      <div className="flex gap-1">
+        <span className="h-2.5 w-2.5 animate-bounce rounded-full bg-emerald-400 [animation-delay:-0.2s]" />
+        <span className="h-2.5 w-2.5 animate-bounce rounded-full bg-emerald-500 [animation-delay:-0.1s]" />
+        <span className="h-2.5 w-2.5 animate-bounce rounded-full bg-emerald-600" />
+      </div>
+      <div>
+        <p className="text-[11px] font-black uppercase tracking-[0.16em] text-slate-500">Consultant is preparing</p>
+        <p className="text-sm text-slate-600">Your answer is being generated...</p>
+      </div>
+    </div>
+  </div>
+);
 
 const AstrologyConsultantScreen: React.FC<AstrologyConsultantScreenProps> = ({
   profile,
@@ -120,10 +250,7 @@ const AstrologyConsultantScreen: React.FC<AstrologyConsultantScreenProps> = ({
       ]);
       setCredits(result.credits);
     } catch (nextError: any) {
-      setError(
-        nextError?.message ||
-          'උපදේශක ප්‍රතිචාරය ලබා ගැනීමට නොහැකි විය. කරුණාකර නැවත උත්සාහ කරන්න.'
-      );
+      setError(nextError?.message || 'Unable to get the consultant reply. Please try again.');
     } finally {
       setSending(false);
     }
@@ -145,8 +272,7 @@ const AstrologyConsultantScreen: React.FC<AstrologyConsultantScreenProps> = ({
           Personal Astrology Consultant
         </h2>
         <p className="relative z-10 mt-2 sinhala text-sm leading-6 text-slate-600">
-          ඔබගේ ඕනෑම ගැටලුවක් මෙහි සඳහන් කරන්න. ජ්‍යොතිෂයට අනුව ඔබට අවශ්‍ය හොඳම
-          විසදුම් හෝ උපදෙස් අප ලබාදෙන්නෙමු.
+          ඔබගේ ඕනෑම ගැටලුවක් මෙහි සඳහන් කරන්න. ජ්‍යොතිෂයට අනුව ඔබට අවශ්‍ය හොඳම විස්ඳුම් හෝ උපදෙස් අප ලබාදෙන්නෙමු.
         </p>
         <div className="relative z-10 mt-4 flex flex-wrap gap-2 text-[10px] font-bold">
           <span className="rounded-full bg-white px-3 py-1 text-slate-600">
@@ -155,9 +281,7 @@ const AstrologyConsultantScreen: React.FC<AstrologyConsultantScreenProps> = ({
           <span className="rounded-full bg-white px-3 py-1 text-slate-600">
             Free Left: {Math.max(0, 4 - credits.free_messages_used)}
           </span>
-          <span className="rounded-full bg-white px-3 py-1 text-slate-600">
-            Profile Linked
-          </span>
+          <span className="rounded-full bg-white px-3 py-1 text-slate-600">Profile Linked</span>
         </div>
       </header>
 
@@ -190,8 +314,7 @@ const AstrologyConsultantScreen: React.FC<AstrologyConsultantScreenProps> = ({
       <div className="min-h-[38vh] space-y-3">
         {messages.length === 0 ? (
           <div className="rounded-[1.8rem] border border-slate-200 bg-white p-4 text-sm leading-7 text-slate-600">
-            අපි ඔබට පියවරෙන් පියවර උපදෙස් ලබා දෙන්නෙමු. මුලින් ඉතා කෙටියෙන්
-            ගැටලුව සදහන් කරන්න.
+            අපි ඔබට පියවරෙන් පියවර උපදෙස් ලබා දෙන්නෙමු. මුලින් ඉතා කෙටියෙන් ගැටලුව සඳහන් කරන්න.
           </div>
         ) : (
           messages.map((message) => (
@@ -203,10 +326,13 @@ const AstrologyConsultantScreen: React.FC<AstrologyConsultantScreenProps> = ({
                   : 'ml-8 bg-slate-900 text-white'
               }`}
             >
-              {formatMessageWithBold(message.text)}
+              {message.role === 'assistant'
+                ? renderStructuredMessage(message.text)
+                : renderInlineFormatting(message.text)}
             </div>
           ))
         )}
+        {sending && <ThinkingBubble />}
       </div>
 
       <section className="rounded-[2rem] border border-slate-200 bg-white p-4 shadow-sm">
@@ -232,17 +358,13 @@ const AstrologyConsultantScreen: React.FC<AstrologyConsultantScreenProps> = ({
           disabled={!canChat || sending || loadingCredits}
           className="mt-3 w-full rounded-2xl border border-slate-200 p-3 text-sm text-slate-700 outline-none focus:border-indigo-400 disabled:bg-slate-100"
         />
-        <p className="mt-2 text-[11px] italic text-slate-500">
-          ඔබගේ පෞද්ගලිකත්වය 100% ක් සුරක්ෂිතයි. ඔබ පවසන කිසිදු කරුණක් බාහිර
-          පාර්ශවයකට අනාවරණය නොවේ.
-        </p>
         <button
           type="button"
           onClick={() => void handleSend()}
           disabled={!canChat || sending || loadingCredits || !input.trim()}
           className="mt-3 w-full rounded-full bg-slate-900 px-5 py-3 text-sm font-black text-white disabled:opacity-60"
         >
-          {sending ? 'ග්‍රහ චාරය පරීක්ෂා කරමින්...' : 'Send'}
+          {sending ? 'Preparing your reading...' : 'Send'}
         </button>
       </section>
 
@@ -257,8 +379,7 @@ const AstrologyConsultantScreen: React.FC<AstrologyConsultantScreenProps> = ({
           <div className="w-full rounded-[2rem] border border-indigo-100 bg-white p-5 shadow-xl">
             <h3 className="text-lg font-black text-slate-900">Consultation Credits අවසන්</h3>
             <p className="mt-2 text-sm text-slate-600">
-              ඔබගේ free consultation sessions අවසන්. Continue කිරීමට පහත
-              subscription plan එකක් තෝරන්න.
+              ඔබගේ free consultation sessions අවසන්. Continue කිරීමට පහත subscription plan එකක් තෝරන්න.
             </p>
             <div className="mt-4 space-y-3">
               <StripeCheckoutButton

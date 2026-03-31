@@ -197,7 +197,7 @@ const LawOfAttraction: React.FC<LawOfAttractionProps> = ({ profile }) => {
       <ResultLoadingScreen 
         isReady={!loading} 
         onComplete={() => setShowLoading(false)}
-        icon="✨"
+        icon="🌌"
         title="දත්ත පූරණය වෙමින් පවතී..."
         subtitle="මෙය සකස් කිරීමට තත්පර 30ක් පමණ ගතවනු ඇත. කරුණාකර රැඳී සිටින්න."
         colorTheme="indigo"

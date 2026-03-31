@@ -38,7 +38,7 @@ const PastLifePath: React.FC<PastLifePathProps> = ({ profile }) => {
       <ResultLoadingScreen 
         isReady={!loading} 
         onComplete={() => setShowLoading(false)}
-        icon="🌀"
+        icon="🌌"
         title="ආත්මීය මඟ විශ්ලේෂණය කරමින්..."
         subtitle="මෙය සකස් කිරීමට තත්පර 30ක් පමණ ගතවනු ඇත. කරුණාකර රැඳී සිටින්න."
         colorTheme="indigo"
