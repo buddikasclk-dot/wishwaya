@@ -1582,6 +1582,33 @@ const App: React.FC = () => {
                         )}
                       </div>
 
+                      <div className="bg-white p-6 rounded-[2.5rem] zen-shadow border border-gray-50 space-y-4">
+                        <div className="flex items-center justify-between gap-4">
+                          <div>
+                            <p className="text-[9px] text-gray-400 font-bold uppercase tracking-[0.2em]">Session</p>
+                            <h3 className="sinhala font-black text-gray-800 text-sm">
+                              {user ? 'Logout from this account' : 'Clear this device profile'}
+                            </h3>
+                          </div>
+                          <div className="px-3 py-1 rounded-full text-[9px] font-black uppercase tracking-widest bg-red-50 text-red-500">
+                            {user ? 'Account' : 'Device'}
+                          </div>
+                        </div>
+
+                        <p className="text-[11px] text-gray-500 leading-relaxed font-medium">
+                          {user
+                            ? 'Sign out from your linked Google account on this device. Your cloud profile will remain saved.'
+                            : 'Remove the locally saved profile from this device and return to onboarding.'}
+                        </p>
+
+                        <button
+                          onClick={() => setShowLogoutConfirm(true)}
+                          className="w-full py-4 rounded-2xl font-bold text-sm transition-all active:scale-95 bg-red-500 text-white border border-red-600 shadow-lg shadow-red-100 hover:bg-red-600"
+                        >
+                          {user ? 'Log out' : 'Clear local profile'}
+                        </button>
+                      </div>
+
                       <NotificationSettings 
                         profile={profile} 
                         onUpdateProfile={handleOnboardingComplete} 
