@@ -386,7 +386,7 @@ export interface AstroReportPurchaseBundle {
   order: AstroReportOrder;
   report: AstroReportRecord;
   payment: {
-    integrationMode: 'placeholder' | 'stripe';
+    integrationMode: 'placeholder' | 'stripe' | 'bank_transfer';
     checkoutToken: string;
     supportedStates: AstroReportOrderStatus[];
     checkoutUrl?: string | null;
@@ -422,4 +422,46 @@ export interface ConsultantChatMessage {
   role: 'user' | 'assistant';
   text: string;
   createdAt: string;
+}
+
+export type ManualPaymentFeature =
+  | 'full_astro_report'
+  | 'consultant_starter_200'
+  | 'consultant_premium_500';
+
+export type ManualPaymentStatus = 'submitted' | 'approved' | 'rejected';
+
+export interface ManualPaymentBankDetails {
+  accountName: string;
+  bankName: string;
+  accountNumber: string;
+  branch?: string | null;
+  hotline?: string | null;
+  instructions?: string | null;
+}
+
+export interface ManualPaymentRequest {
+  id: string;
+  userId: string;
+  feature: ManualPaymentFeature;
+  featureLabel: string;
+  amount: number;
+  currency: string;
+  status: ManualPaymentStatus;
+  paymentMethod: 'bank_transfer';
+  paymentReference: string | null;
+  note: string | null;
+  slipUrl: string;
+  slipMimeType: string;
+  slipOriginalName: string;
+  orderId?: string | null;
+  reportId?: string | null;
+  packageCode?: 'starter_200' | 'premium_500' | null;
+  approvedAt?: string | null;
+  approvedBy?: string | null;
+  rejectedAt?: string | null;
+  rejectedBy?: string | null;
+  adminNote?: string | null;
+  createdAt: string;
+  updatedAt: string;
 }

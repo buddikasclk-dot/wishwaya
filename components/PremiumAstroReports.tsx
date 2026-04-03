@@ -7,6 +7,11 @@ import {
   fetchMyAstroReports,
   getReportStatusLabel,
 } from '../src/services/astroReportClient';
+import {
+  fetchManualPaymentConfig,
+  fileToBase64,
+  submitAstroReportManualPayment,
+} from '../src/services/manualPaymentClient';
 import StripeCheckoutButton from './StripeCheckoutButton';
 
 interface PremiumAstroReportsProps {
@@ -78,6 +83,21 @@ const PremiumAstroReports: React.FC<PremiumAstroReportsProps> = ({
   const [error, setError] = useState<string | null>(null);
   const [selectedReport, setSelectedReport] = useState<AstroReportRecord | null>(null);
   const [pendingOpenAfterAuth, setPendingOpenAfterAuth] = useState(false);
+  const [bankTransferEnabled, setBankTransferEnabled] = useState(false);
+  const [bankDetails, setBankDetails] = useState({
+    accountName: '',
+    bankName: '',
+    accountNumber: '',
+    branch: '',
+    hotline: '',
+    instructions: '',
+  });
+  const [bankSlipFile, setBankSlipFile] = useState<File | null>(null);
+  const [bankReference, setBankReference] = useState('');
+  const [bankNote, setBankNote] = useState('');
+  const [bankSubmitting, setBankSubmitting] = useState(false);
+  const [bankSuccess, setBankSuccess] = useState<string | null>(null);
+  const [paymentMethodView, setPaymentMethodView] = useState<'choose' | 'bank'>('choose');
 
   const refreshReports = async () => {
     setLoadingReports(true);
@@ -99,6 +119,27 @@ const PremiumAstroReports: React.FC<PremiumAstroReportsProps> = ({
   useEffect(() => {
     void refreshReports();
   }, [userId]);
+
+  useEffect(() => {
+    const loadConfig = async () => {
+      try {
+        const config = await fetchManualPaymentConfig();
+        setBankTransferEnabled(config.enabled);
+        setBankDetails({
+          accountName: config.bankDetails.accountName || '',
+          bankName: config.bankDetails.bankName || '',
+          accountNumber: config.bankDetails.accountNumber || '',
+          branch: config.bankDetails.branch || '',
+          hotline: config.bankDetails.hotline || '',
+          instructions: config.bankDetails.instructions || '',
+        });
+      } catch {
+        setBankTransferEnabled(false);
+      }
+    };
+
+    void loadConfig();
+  }, []);
 
   useEffect(() => {
     const hasActiveJob = reports.some((report) =>
@@ -144,6 +185,7 @@ const PremiumAstroReports: React.FC<PremiumAstroReportsProps> = ({
 
   const openPremiumFlow = async () => {
     setError(null);
+    setPaymentMethodView('choose');
     setFlowStep('intro');
   };
 
@@ -174,6 +216,39 @@ const PremiumAstroReports: React.FC<PremiumAstroReportsProps> = ({
       setError(nextError?.message || 'Admin report request could not be started.');
     } finally {
       setActionLoading(false);
+    }
+  };
+
+  const handleSubmitBankTransfer = async () => {
+    if (!userId || !bankSlipFile) {
+      setError('Please attach the transfer slip first.');
+      return;
+    }
+
+    setBankSubmitting(true);
+    setError(null);
+    setBankSuccess(null);
+
+    try {
+      const slipBase64 = await fileToBase64(bankSlipFile);
+      await submitAstroReportManualPayment({
+        userId,
+        profile,
+        paymentReference: bankReference,
+        note: bankNote,
+        slipBase64,
+        slipMimeType: bankSlipFile.type || 'application/octet-stream',
+        slipOriginalName: bankSlipFile.name,
+      });
+      setBankSlipFile(null);
+      setBankReference('');
+      setBankNote('');
+      setPaymentMethodView('bank');
+      setBankSuccess('ඔබගේ payment slip එක ලැබී ඇත. Admin කණ්ඩායම එය හැකි ඉක්මනින් අනුමත කරනු ඇත. අනුමත වූ පසු ඔබට නැවත පැමිණ report details පුරවා ඉදිරියට යා හැක.');
+    } catch (nextError: any) {
+      setError(nextError?.message || 'Bank transfer submission failed');
+    } finally {
+      setBankSubmitting(false);
     }
   };
 
@@ -414,8 +489,109 @@ const PremiumAstroReports: React.FC<PremiumAstroReportsProps> = ({
                   </div>
                 </div>
                 <div className="rounded-[2rem] border border-sky-100 bg-sky-50/70 p-5 text-sm leading-7 text-slate-600">
-                  Pay securely with Stripe.
+                  Choose your payment method below.
                 </div>
+                {paymentMethodView === 'choose' && (
+                  <div className={`grid gap-3 ${bankTransferEnabled ? 'md:grid-cols-2' : ''}`}>
+                    {!isSuperAdmin && (
+                      <StripeCheckoutButton
+                        label="Card Payments"
+                        customerEmail={userEmail}
+                        payload={{
+                          userId,
+                          profile,
+                        }}
+                        className="w-full rounded-[1.8rem] bg-slate-900 px-6 py-5 text-sm font-black text-white shadow-lg shadow-slate-300"
+                      />
+                    )}
+                    {bankTransferEnabled && (
+                      <button
+                        type="button"
+                        onClick={() => setPaymentMethodView('bank')}
+                        className="w-full rounded-[1.8rem] border border-amber-200 bg-amber-50 px-6 py-5 text-sm font-black text-amber-800 shadow-sm"
+                      >
+                        Bank Deposit
+                      </button>
+                    )}
+                  </div>
+                )}
+                {bankTransferEnabled && paymentMethodView === 'bank' && (
+                  <div className="rounded-[2rem] border border-amber-200 bg-amber-50/70 p-5 shadow-sm">
+                    <div className="flex items-start justify-between gap-4">
+                      <div>
+                        <p className="text-sm font-black text-slate-900">Bank Deposit / Transfer</p>
+                        <p className="mt-2 sinhala text-sm leading-7 text-slate-600">
+                          නියමිත මුදල බැංකු ගිණුමට තැන්පත් කර, ඔබගේ තැන්පතු හෝ මාරු කිරීමේ slip එක PDF හෝ image ලෙස upload කරන්න. අපගේ admin කණ්ඩායම එය හැකි ඉක්මනින් පරීක්ෂා කර අනුමත කරනු ඇත.
+                        </p>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => setPaymentMethodView('choose')}
+                        className="rounded-full bg-white px-4 py-2 text-xs font-black text-slate-700"
+                      >
+                        Back
+                      </button>
+                    </div>
+                    <div className="mt-4 space-y-3">
+                      <div className="rounded-2xl bg-white/90 px-4 py-4 text-sm leading-7 text-slate-700">
+                        <p>Account Name: {bankDetails.accountName}</p>
+                        <p>Bank: {bankDetails.bankName}</p>
+                        <p>Account Number: {bankDetails.accountNumber}</p>
+                        {bankDetails.branch && <p>Branch: {bankDetails.branch}</p>}
+                        {bankDetails.instructions && <p>{bankDetails.instructions}</p>}
+                        {bankDetails.hotline && <p>Hotline for inquiries: {bankDetails.hotline}</p>}
+                      </div>
+                      <input
+                        type="text"
+                        value={bankReference}
+                        onChange={(event) => setBankReference(event.target.value)}
+                        placeholder="Transfer reference or deposit reference"
+                        className="w-full rounded-2xl border border-amber-200 bg-white px-4 py-3 text-sm text-slate-700 outline-none focus:border-amber-400"
+                      />
+                      <textarea
+                        value={bankNote}
+                        onChange={(event) => setBankNote(event.target.value)}
+                        placeholder="Optional note"
+                        rows={3}
+                        className="w-full rounded-2xl border border-amber-200 bg-white px-4 py-3 text-sm text-slate-700 outline-none focus:border-amber-400"
+                      />
+                      <div className="rounded-2xl border border-amber-200 bg-white px-4 py-4">
+                        <input
+                          id="premium-bank-slip-upload"
+                          type="file"
+                          accept="application/pdf,image/png,image/jpeg,image/jpg"
+                          onChange={(event) => setBankSlipFile(event.target.files?.[0] || null)}
+                          className="hidden"
+                        />
+                        <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                          <label
+                            htmlFor="premium-bank-slip-upload"
+                            className="inline-flex cursor-pointer items-center justify-center rounded-full bg-amber-100 px-5 py-3 text-sm font-black text-amber-800"
+                          >
+                            Upload Payment Slip
+                          </label>
+                          <p className="text-sm text-slate-600">
+                            {bankSlipFile ? bankSlipFile.name : 'No file selected yet'}
+                          </p>
+                        </div>
+                        <p className="mt-3 text-xs text-slate-500">Accepted: PDF, PNG, JPG, JPEG</p>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => void handleSubmitBankTransfer()}
+                        disabled={bankSubmitting || !bankSlipFile}
+                        className="w-full rounded-full bg-amber-600 px-6 py-4 text-sm font-black text-white disabled:opacity-70"
+                      >
+                        {bankSubmitting ? 'Submitting Slip...' : 'Submit Payment Slip'}
+                      </button>
+                      {bankSuccess && (
+                        <div className="rounded-2xl bg-emerald-50 px-4 py-3 text-sm text-emerald-700">
+                          {bankSuccess}
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                )}
                 {authEnabled && !userEmail && (
                   <div className="rounded-[2rem] border border-emerald-100 bg-white/85 p-5 shadow-sm">
                     <p className="text-sm font-black text-slate-800">Optional</p>
@@ -432,8 +608,8 @@ const PremiumAstroReports: React.FC<PremiumAstroReportsProps> = ({
                     </button>
                   </div>
                 )}
-                <div className="sticky bottom-0 -mx-2 space-y-3 bg-gradient-to-t from-[#f4fbff] via-[#f4fbff] to-transparent px-2 pt-5">
-                  {isSuperAdmin && (
+                {isSuperAdmin && (
+                  <div className="sticky bottom-0 -mx-2 space-y-3 bg-gradient-to-t from-[#f4fbff] via-[#f4fbff] to-transparent px-2 pt-5">
                     <button
                       type="button"
                       onClick={() => void handleStartAdminReport()}
@@ -442,18 +618,8 @@ const PremiumAstroReports: React.FC<PremiumAstroReportsProps> = ({
                     >
                       {actionLoading ? 'Please wait...' : 'Start Report (Super Admin - No Payment)'}
                     </button>
-                  )}
-                  {!isSuperAdmin && (
-                    <StripeCheckoutButton
-                      label="Pay with Stripe"
-                      customerEmail={userEmail}
-                      payload={{
-                        userId,
-                        profile,
-                      }}
-                    />
-                  )}
-                </div>
+                  </div>
+                )}
               </div>
             )}
 

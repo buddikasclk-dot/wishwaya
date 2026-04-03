@@ -21,6 +21,7 @@ import NotificationSettings from '../components/NotificationSettings';
 import ProfileEditor from '../components/ProfileEditor';
 import PremiumAstroReports from '../components/PremiumAstroReports';
 import AstrologyConsultantScreen from '../components/AstrologyConsultantScreen';
+import SuperAdminDashboard from '../components/SuperAdminDashboard';
 import { useAuth } from './auth/AuthContext';
 import { getEffectiveUserId, migrateUserIdToFirebase } from './auth/userIdentity';
 import { getUserProfile, saveUserProfile } from './services/userProfileStore';
@@ -158,6 +159,7 @@ const VALID_TABS = new Set([
   'loa',
   'pastlife',
   'consultant',
+  'admin',
   'profile',
 ]);
 
@@ -1252,6 +1254,16 @@ const App: React.FC = () => {
   };
 
   const showInlineProfilePreparation = profileLoading && !!profile;
+  const normalizedUserEmail = (user?.email || '').trim().toLowerCase();
+  const isSuperAdmin =
+    normalizedUserEmail === '3dcafe.buddika@gmail.com' ||
+    normalizedUserEmail === '3dcafe.buddika@gmal.com';
+
+  useEffect(() => {
+    if (activeTab === 'admin' && !isSuperAdmin) {
+      setActiveTab('dashboard');
+    }
+  }, [activeTab, isSuperAdmin]);
 
   if (showSplash || authLoading || (!profile && profileLoading)) return <GlobalLoader />; 
 
@@ -1395,6 +1407,9 @@ const App: React.FC = () => {
                   userEmail={user?.email || null}
                 />
               )}
+              {activeTab === 'admin' && isSuperAdmin && user?.email && (
+                <SuperAdminDashboard adminEmail={user.email} />
+              )}
               {activeTab === 'profile' && (
                 <div className="animate-in slide-in-from-bottom-8 duration-700">
                   {/* Hero Header with Video Background */}
@@ -1431,6 +1446,27 @@ const App: React.FC = () => {
                       onRequireGoogleLink={handleGoogleLink}
                       onSaveRequiredProfile={handleProfileDetailsSave}
                     />
+
+                    {isSuperAdmin && (
+                      <button
+                        type="button"
+                        onClick={() => setActiveTab('admin')}
+                        className="w-full rounded-[2.4rem] border border-amber-200 bg-[radial-gradient(circle_at_top,_rgba(251,191,36,0.18),_transparent_34%),linear-gradient(160deg,_#fffdf5_0%,_#fff8e7_55%,_#fffef9_100%)] p-6 text-left shadow-[0_20px_48px_rgba(245,158,11,0.10)] transition-all duration-200 hover:-translate-y-0.5"
+                      >
+                        <div className="flex items-start justify-between gap-4">
+                          <div>
+                            <p className="text-[10px] font-black uppercase tracking-[0.22em] text-amber-700">Super Admin</p>
+                            <h3 className="mt-2 text-xl font-black text-slate-900">Open Payment Review Dashboard</h3>
+                            <p className="mt-2 text-sm leading-7 text-slate-600">
+                              Review bank transfer slips, approve payments, reject submissions, and manage future admin tools from one place.
+                            </p>
+                          </div>
+                          <div className="rounded-full bg-white/90 px-4 py-2 text-xs font-black text-amber-700 shadow-sm">
+                            Open
+                          </div>
+                        </div>
+                      </button>
+                    )}
 
                     <div className="bg-white p-10 rounded-[4rem] zen-shadow border border-white shadow-xl text-left space-y-8 mt-[-1.5rem] relative z-20 overflow-hidden">
                       <div className="absolute top-0 right-0 p-10 text-9xl opacity-[0.02] pointer-events-none">✨</div>

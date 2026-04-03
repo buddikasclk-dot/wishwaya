@@ -335,6 +335,31 @@ export class PremiumAstroReportEngine {
     return { order, report };
   }
 
+  confirmManualPayment(orderId: string, paymentReference: string) {
+    const orders = this.getOrders();
+    const reports = this.getReports();
+    const order = orders.find((entry) => entry.id === orderId);
+    const report = reports.find((entry) => entry.orderId === orderId);
+
+    if (!order || !report) {
+      throw new Error('Order not found');
+    }
+
+    order.status = 'paid';
+    order.paymentGateway = 'bank_transfer';
+    order.paymentReference = paymentReference;
+    order.updatedAt = new Date().toISOString();
+
+    report.status = 'collecting_inputs';
+    report.updatedAt = new Date().toISOString();
+    report.failureReason = null;
+
+    this.saveOrders(orders);
+    this.saveReports(reports);
+
+    return { order, report };
+  }
+
   markPaymentCancelled(orderId: string, paymentReference?: string) {
     const orders = this.getOrders();
     const reports = this.getReports();

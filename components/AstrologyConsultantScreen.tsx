@@ -1,6 +1,11 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { ConsultantChatMessage, ConsultantCredits, UserProfile } from '../types';
 import { fetchConsultantCredits, sendConsultantMessage } from '../src/services/astrologyConsultantClient';
+import {
+  fetchManualPaymentConfig,
+  fileToBase64,
+  submitConsultantManualPayment,
+} from '../src/services/manualPaymentClient';
 import StripeCheckoutButton from './StripeCheckoutButton';
 
 interface AstrologyConsultantScreenProps {
@@ -171,12 +176,32 @@ const AstrologyConsultantScreen: React.FC<AstrologyConsultantScreenProps> = ({
   userId,
   userEmail = null,
 }) => {
+  const normalizedEmail = (userEmail || '').trim().toLowerCase();
+  const isSuperAdmin =
+    normalizedEmail === '3dcafe.buddika@gmail.com' || normalizedEmail === '3dcafe.buddika@gmal.com';
   const [credits, setCredits] = useState<ConsultantCredits>(INITIAL_CREDITS);
   const [loadingCredits, setLoadingCredits] = useState(true);
   const [messages, setMessages] = useState<ConsultantChatMessage[]>([]);
   const [input, setInput] = useState('');
   const [sending, setSending] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [bankTransferEnabled, setBankTransferEnabled] = useState(false);
+  const [bankDetails, setBankDetails] = useState({
+    accountName: '',
+    bankName: '',
+    accountNumber: '',
+    branch: '',
+    hotline: '',
+    instructions: '',
+  });
+  const [selectedPackage, setSelectedPackage] = useState<'starter_200' | 'premium_500'>('starter_200');
+  const [bankReference, setBankReference] = useState('');
+  const [bankNote, setBankNote] = useState('');
+  const [bankSlipFile, setBankSlipFile] = useState<File | null>(null);
+  const [bankSubmitting, setBankSubmitting] = useState(false);
+  const [bankSuccess, setBankSuccess] = useState<string | null>(null);
+  const [paymentMethodView, setPaymentMethodView] = useState<'choose' | 'bank'>('choose');
+  const [showProTeaser, setShowProTeaser] = useState(false);
 
   const canChat = useMemo(
     () => (credits.paid_credits > 0 || credits.free_messages_used < 4) && !!userId,
@@ -199,6 +224,27 @@ const AstrologyConsultantScreen: React.FC<AstrologyConsultantScreenProps> = ({
   useEffect(() => {
     void loadCredits();
   }, [userId, userEmail]);
+
+  useEffect(() => {
+    const loadConfig = async () => {
+      try {
+        const config = await fetchManualPaymentConfig();
+        setBankTransferEnabled(config.enabled);
+        setBankDetails({
+          accountName: config.bankDetails.accountName || '',
+          bankName: config.bankDetails.bankName || '',
+          accountNumber: config.bankDetails.accountNumber || '',
+          branch: config.bankDetails.branch || '',
+          hotline: config.bankDetails.hotline || '',
+          instructions: config.bankDetails.instructions || '',
+        });
+      } catch {
+        setBankTransferEnabled(false);
+      }
+    };
+
+    void loadConfig();
+  }, []);
 
   useEffect(() => {
     const url = new URL(window.location.href);
@@ -260,6 +306,39 @@ const AstrologyConsultantScreen: React.FC<AstrologyConsultantScreenProps> = ({
     setInput((current) => (current ? `${current}\n${suggestion}` : suggestion));
   };
 
+  const handleSubmitConsultantBankTransfer = async () => {
+    if (!userId || !bankSlipFile) {
+      setError('Please attach the transfer slip first.');
+      return;
+    }
+
+    setBankSubmitting(true);
+    setError(null);
+    setBankSuccess(null);
+
+    try {
+      const slipBase64 = await fileToBase64(bankSlipFile);
+      await submitConsultantManualPayment({
+        userId,
+        packageCode: selectedPackage,
+        paymentReference: bankReference,
+        note: bankNote,
+        slipBase64,
+        slipMimeType: bankSlipFile.type || 'application/octet-stream',
+        slipOriginalName: bankSlipFile.name,
+      });
+      setBankSlipFile(null);
+      setBankReference('');
+      setBankNote('');
+      setPaymentMethodView('bank');
+      setBankSuccess('Payment slip received. Admin will approve it as soon as possible, then your consultant credits will be added.');
+    } catch (nextError: any) {
+      setError(nextError?.message || 'Bank transfer submission failed');
+    } finally {
+      setBankSubmitting(false);
+    }
+  };
+
   return (
     <div className="relative space-y-5 p-6 pb-28 animate-in fade-in duration-500">
       <header className="relative overflow-hidden rounded-[2.6rem] border border-white/80 bg-[radial-gradient(circle_at_top,_rgba(74,222,128,0.18),_transparent_38%),linear-gradient(140deg,_#f7fff9_0%,_#eef7ff_52%,_#f8faff_100%)] p-5 shadow-[0_20px_45px_-25px_rgba(15,23,42,0.35)]">
@@ -311,7 +390,40 @@ const AstrologyConsultantScreen: React.FC<AstrologyConsultantScreenProps> = ({
         </button>
       </section>
 
-      <div className="min-h-[38vh] space-y-3">
+      <section className="rounded-[1.8rem] border border-emerald-100 bg-emerald-50/60 p-4 shadow-sm">
+        <div className="flex items-center justify-between gap-3">
+          <div>
+            <p className="text-[10px] font-black uppercase tracking-[0.18em] text-emerald-700">Pro Service</p>
+            <p className="mt-1 sinhala text-sm font-bold text-slate-800">ප්‍රෝ ජ්‍යොතිෂ උපදේශන සේවාව</p>
+          </div>
+          <button
+            type="button"
+            onClick={() => setShowProTeaser((current) => !current)}
+            className="rounded-full border border-emerald-200 bg-white px-4 py-2 text-[11px] font-black text-emerald-700"
+          >
+            {showProTeaser ? 'වහන්න' : 'වැඩිදුර'}
+          </button>
+        </div>
+        {showProTeaser && (
+          <div className="mt-3 space-y-3">
+            <p className="sinhala text-sm leading-7 text-slate-600">
+              ප්‍රෝ සේවාවෙන් ඔබට වැඩි consultation credits, දිගු කාලයක් personal astrology chat භාවිතා කිරීමේ හැකියාව, සහ ඔබගේ ගැටළු සඳහා වැඩි පහසු guidance ලබාගත හැක.
+            </p>
+            <button
+              type="button"
+              onClick={() => {
+                setPaymentMethodView('choose');
+                setCredits((current) => ({ ...current, free_messages_used: 4 }));
+              }}
+              className="rounded-full bg-emerald-600 px-4 py-2 text-[11px] font-black text-white"
+            >
+              ප්‍රෝ සේවාව ලබාගන්න
+            </button>
+          </div>
+        )}
+      </section>
+
+      <div className="space-y-3">
         {messages.length === 0 ? (
           <div className="rounded-[1.8rem] border border-slate-200 bg-white p-4 text-sm leading-7 text-slate-600">
             අපි ඔබට පියවරෙන් පියවර උපදෙස් ලබා දෙන්නෙමු. මුලින් ඉතා කෙටියෙන් ගැටලුව සඳහන් කරන්න.
@@ -381,22 +493,147 @@ const AstrologyConsultantScreen: React.FC<AstrologyConsultantScreenProps> = ({
             <p className="mt-2 text-sm text-slate-600">
               ඔබගේ free consultation sessions අවසන්. Continue කිරීමට පහත subscription plan එකක් තෝරන්න.
             </p>
-            <div className="mt-4 space-y-3">
-              <StripeCheckoutButton
-                label="Basic Consultation (30 Msgs) - Rs. 200"
-                customerEmail={userEmail}
-                apiEndpoint="/api/consultant/create-checkout-session"
-                payload={{ userId, packageCode: 'starter_200' }}
-                className="w-full rounded-full bg-indigo-600 px-5 py-3 text-sm font-black text-white"
-              />
-              <StripeCheckoutButton
-                label="Premium Consultation (100 Msgs) - Rs. 500"
-                customerEmail={userEmail}
-                apiEndpoint="/api/consultant/create-checkout-session"
-                payload={{ userId, packageCode: 'premium_500' }}
-                className="w-full rounded-full bg-slate-900 px-5 py-3 text-sm font-black text-white"
-              />
-            </div>
+            {paymentMethodView === 'choose' && (
+              <div className={`mt-4 grid gap-3 ${bankTransferEnabled ? 'grid-cols-2' : 'grid-cols-1'}`}>
+                <div className="space-y-3">
+                  <StripeCheckoutButton
+                    label="Card Payments"
+                    customerEmail={userEmail}
+                    apiEndpoint="/api/consultant/create-checkout-session"
+                    payload={{ userId, packageCode: 'starter_200' }}
+                    className="w-full rounded-[1.5rem] bg-indigo-600 px-5 py-4 text-sm font-black text-white"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => setSelectedPackage('starter_200')}
+                    className={`w-full rounded-full px-4 py-2 text-xs font-black ${
+                      selectedPackage === 'starter_200' ? 'bg-indigo-50 text-indigo-700' : 'bg-slate-50 text-slate-500'
+                    }`}
+                  >
+                    Basic package selected
+                  </button>
+                </div>
+                {bankTransferEnabled && (
+                  <div className="space-y-3">
+                    <button
+                      type="button"
+                      onClick={() => setPaymentMethodView('bank')}
+                      className="w-full rounded-[1.5rem] border border-amber-200 bg-amber-50 px-5 py-4 text-sm font-black text-amber-800"
+                    >
+                      Bank Deposit
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setSelectedPackage('premium_500')}
+                      className={`w-full rounded-full px-4 py-2 text-xs font-black ${
+                        selectedPackage === 'premium_500' ? 'bg-amber-50 text-amber-700' : 'bg-slate-50 text-slate-500'
+                      }`}
+                    >
+                      Premium package selected
+                    </button>
+                  </div>
+                )}
+              </div>
+            )}
+            {bankTransferEnabled && (
+              <div className={`mt-4 rounded-[1.5rem] border border-amber-200 bg-amber-50/80 p-4 ${paymentMethodView === 'bank' ? 'block' : 'hidden'}`}>
+                <div className="flex items-start justify-between gap-3">
+                  <div>
+                    <p className="text-sm font-black text-slate-900">Bank Deposit / Transfer</p>
+                    <p className="mt-2 sinhala text-sm leading-7 text-slate-600">
+                      Stripe භාවිතා නොකරන්නේ නම්, නියමිත මුදල බැංකු ගිණුමට තැන්පත් කර slip එක PDF හෝ image ලෙස upload කරන්න. අපගේ admin කණ්ඩායම එය හැකි ඉක්මනින් පරීක්ෂා කර අනුමත කරනු ඇත.
+                    </p>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => setPaymentMethodView('choose')}
+                    className="rounded-full bg-amber-600 px-4 py-2 text-xs font-black text-white"
+                  >
+                    Back
+                  </button>
+                </div>
+                <>
+                    <div className="mt-3 rounded-2xl bg-white/90 px-4 py-4 text-sm leading-7 text-slate-700">
+                      <p>Account Name: {bankDetails.accountName}</p>
+                      <p>Bank: {bankDetails.bankName}</p>
+                      <p>Account Number: {bankDetails.accountNumber}</p>
+                      {bankDetails.branch && <p>Branch: {bankDetails.branch}</p>}
+                      {bankDetails.instructions && <p>{bankDetails.instructions}</p>}
+                      {bankDetails.hotline && <p>Hotline for inquiries: {bankDetails.hotline}</p>}
+                    </div>
+                <div className="mt-4 grid grid-cols-2 gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setSelectedPackage('starter_200')}
+                    className={`rounded-full px-4 py-2 text-xs font-black ${
+                      selectedPackage === 'starter_200' ? 'bg-amber-600 text-white' : 'bg-white text-slate-700'
+                    }`}
+                  >
+                    Basic Rs. 200
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setSelectedPackage('premium_500')}
+                    className={`rounded-full px-4 py-2 text-xs font-black ${
+                      selectedPackage === 'premium_500' ? 'bg-amber-600 text-white' : 'bg-white text-slate-700'
+                    }`}
+                  >
+                    Premium Rs. 500
+                  </button>
+                </div>
+                <div className="mt-3 space-y-3">
+                  <input
+                    type="text"
+                    value={bankReference}
+                    onChange={(event) => setBankReference(event.target.value)}
+                    placeholder="Transfer reference or deposit reference"
+                    className="w-full rounded-2xl border border-amber-200 bg-white px-4 py-3 text-sm text-slate-700 outline-none focus:border-amber-400"
+                  />
+                  <textarea
+                    value={bankNote}
+                    onChange={(event) => setBankNote(event.target.value)}
+                    placeholder="Optional note"
+                    rows={3}
+                    className="w-full rounded-2xl border border-amber-200 bg-white px-4 py-3 text-sm text-slate-700 outline-none focus:border-amber-400"
+                  />
+                  <div className="rounded-2xl border border-amber-200 bg-white px-4 py-4">
+                    <input
+                      id="consultant-bank-slip-upload"
+                      type="file"
+                      accept="application/pdf,image/png,image/jpeg,image/jpg"
+                      onChange={(event) => setBankSlipFile(event.target.files?.[0] || null)}
+                      className="hidden"
+                    />
+                    <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                      <label
+                        htmlFor="consultant-bank-slip-upload"
+                        className="inline-flex cursor-pointer items-center justify-center rounded-full bg-amber-100 px-5 py-3 text-sm font-black text-amber-800"
+                      >
+                        Upload Payment Slip
+                      </label>
+                      <p className="text-sm text-slate-600">
+                        {bankSlipFile ? bankSlipFile.name : 'No file selected yet'}
+                      </p>
+                    </div>
+                    <p className="mt-3 text-xs text-slate-500">Accepted: PDF, PNG, JPG, JPEG</p>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => void handleSubmitConsultantBankTransfer()}
+                    disabled={bankSubmitting || !bankSlipFile}
+                    className="w-full rounded-full bg-amber-600 px-5 py-3 text-sm font-black text-white disabled:opacity-70"
+                  >
+                    {bankSubmitting ? 'Submitting Slip...' : 'Submit Payment Slip'}
+                  </button>
+                      {bankSuccess && (
+                        <div className="rounded-2xl bg-emerald-50 px-4 py-3 text-sm text-emerald-700">
+                          {bankSuccess}
+                        </div>
+                      )}
+                    </div>
+                </>
+              </div>
+            )}
           </div>
         </div>
       )}

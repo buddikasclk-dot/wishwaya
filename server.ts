@@ -7,6 +7,7 @@ import { fileURLToPath } from 'url';
 import { loadEnv } from 'vite';
 import { nekathDatabase } from './src/data/nekathData.ts';
 import { PremiumAstroReportEngine } from './services/premiumAstroReportEngine.ts';
+import { ManualPaymentService } from './services/manualPaymentService.ts';
 
 // Fallback for nekathDatabase if import fails or is empty
 const safeNekathDatabase = nekathDatabase || {};
@@ -57,6 +58,14 @@ const normalizeEmail = (value: unknown) =>
 const isSuperAdminEmail = (email: unknown) => {
   const normalized = normalizeEmail(email);
   return normalized ? SUPER_ADMIN_EMAILS.has(normalized) : false;
+};
+
+const requireSuperAdmin = (email: unknown) => {
+  const normalized = normalizeEmail(email);
+  if (!isSuperAdminEmail(normalized)) {
+    throw new Error('Super admin access required');
+  }
+  return normalized;
 };
 
 const createStripeCheckoutSession = async (input?: {
@@ -196,6 +205,7 @@ const SUBSCRIPTIONS_FILE = path.join(DATA_DIR, 'subscriptions.json');
 const VAPID_KEYS_FILE = path.join(DATA_DIR, 'vapid.json');
 const USERS_CREDITS_FILE = path.join(DATA_DIR, 'users-credits.json');
 const premiumAstroReportEngine = new PremiumAstroReportEngine(DATA_DIR);
+const manualPaymentService = new ManualPaymentService(DATA_DIR);
 
 type UserCreditsRecord = {
   user_id: string;
@@ -935,6 +945,242 @@ app.post('/api/create-checkout-session', async (req, res) => {
   } catch (error: any) {
     console.error('[stripe] create checkout session failed', error);
     res.status(500).json({ error: error?.message || 'Failed to create checkout session' });
+  }
+});
+
+app.get('/api/manual-payments/config', (_req, res) => {
+  res.json({
+    enabled: manualPaymentService.isEnabled(),
+    bankDetails: manualPaymentService.getBankDetails(),
+  });
+});
+
+app.post('/api/manual-payments/astro-report', (req, res) => {
+  try {
+    if (!manualPaymentService.isEnabled()) {
+      return res.status(400).json({ error: 'Bank transfer payment is not configured yet' });
+    }
+
+    const userId = String(req.body?.userId || '').trim();
+    if (!userId) {
+      return res.status(400).json({ error: 'userId is required' });
+    }
+
+    const slipBase64 = String(req.body?.slipBase64 || '').trim();
+    const slipMimeType = String(req.body?.slipMimeType || '').trim();
+    const slipOriginalName = String(req.body?.slipOriginalName || '').trim();
+
+    if (!slipBase64 || !slipMimeType || !slipOriginalName) {
+      return res.status(400).json({ error: 'Slip file is required' });
+    }
+
+    const created = premiumAstroReportEngine.createOrder({
+      userId,
+      profile: req.body?.profile || null,
+    });
+
+    const request = manualPaymentService.submit({
+      userId,
+      feature: 'full_astro_report',
+      featureLabel: 'Premium Astrology Report',
+      amount: created.order.amount,
+      currency: created.order.currency,
+      paymentReference: req.body?.paymentReference || null,
+      note: req.body?.note || null,
+      slipBase64,
+      slipMimeType,
+      slipOriginalName,
+      orderId: created.order.id,
+      reportId: created.report.id,
+    });
+
+    res.status(201).json({
+      request,
+      order: created.order,
+      report: created.report,
+    });
+  } catch (error: any) {
+    console.error('[manual-payment] astro-report submission failed', error);
+    res.status(500).json({ error: error?.message || 'Failed to submit manual payment' });
+  }
+});
+
+app.post('/api/manual-payments/consultant', (req, res) => {
+  try {
+    if (!manualPaymentService.isEnabled()) {
+      return res.status(400).json({ error: 'Bank transfer payment is not configured yet' });
+    }
+
+    const userId = String(req.body?.userId || '').trim();
+    const packageCode = String(req.body?.packageCode || '').trim() as ConsultantPackageCode;
+    const slipBase64 = String(req.body?.slipBase64 || '').trim();
+    const slipMimeType = String(req.body?.slipMimeType || '').trim();
+    const slipOriginalName = String(req.body?.slipOriginalName || '').trim();
+
+    if (!userId) {
+      return res.status(400).json({ error: 'userId is required' });
+    }
+    if (packageCode !== 'starter_200' && packageCode !== 'premium_500') {
+      return res.status(400).json({ error: 'Invalid packageCode' });
+    }
+    if (!slipBase64 || !slipMimeType || !slipOriginalName) {
+      return res.status(400).json({ error: 'Slip file is required' });
+    }
+
+    const packageConfig = getConsultantPackageConfig(packageCode);
+    const request = manualPaymentService.submit({
+      userId,
+      feature: packageCode === 'starter_200' ? 'consultant_starter_200' : 'consultant_premium_500',
+      featureLabel:
+        packageCode === 'starter_200'
+          ? 'Basic Consultation (30 Msgs)'
+          : 'Premium Consultation (100 Msgs)',
+      amount: Number(packageConfig.priceLabel.replace(/[^\d]/g, '')) || 0,
+      currency: 'LKR',
+      paymentReference: req.body?.paymentReference || null,
+      note: req.body?.note || null,
+      slipBase64,
+      slipMimeType,
+      slipOriginalName,
+      packageCode,
+    });
+
+    res.status(201).json({ request });
+  } catch (error: any) {
+    console.error('[manual-payment] consultant submission failed', error);
+    res.status(500).json({ error: error?.message || 'Failed to submit manual payment' });
+  }
+});
+
+app.get('/api/manual-payments', (req, res) => {
+  try {
+    const adminEmail = String(req.query.adminEmail || '').trim();
+    const userId = String(req.query.userId || '').trim();
+    const feature = String(req.query.feature || '').trim() || undefined;
+    const status = String(req.query.status || '').trim() || undefined;
+
+    if (adminEmail) {
+      requireSuperAdmin(adminEmail);
+      return res.json(
+        manualPaymentService.list(
+          feature as 'full_astro_report' | 'consultant_starter_200' | 'consultant_premium_500' | undefined,
+          status as 'submitted' | 'approved' | 'rejected' | undefined
+        )
+      );
+    }
+
+    if (!userId) {
+      return res.status(400).json({ error: 'userId or adminEmail is required' });
+    }
+
+    res.json(
+      manualPaymentService.listForUser(
+        userId,
+        feature as 'full_astro_report' | 'consultant_starter_200' | 'consultant_premium_500' | undefined
+      )
+    );
+  } catch (error: any) {
+    console.error('[manual-payment] list failed', error);
+    res.status(403).json({ error: error?.message || 'Failed to list manual payments' });
+  }
+});
+
+app.get('/api/manual-payments/:requestId/slip', (req, res) => {
+  try {
+    const request = manualPaymentService.getById(req.params.requestId);
+    if (!request) {
+      return res.status(404).json({ error: 'Slip not found' });
+    }
+
+    const adminEmail = String(req.query.adminEmail || '').trim();
+    const userId = String(req.query.userId || '').trim();
+    const isOwner = userId && request.userId === userId;
+
+    if (!isOwner) {
+      requireSuperAdmin(adminEmail);
+    }
+
+    const filePath = manualPaymentService.getSlipFilePath(req.params.requestId);
+    if (!filePath || !fs.existsSync(filePath)) {
+      return res.status(404).json({ error: 'Slip file not found' });
+    }
+
+    res.setHeader('Content-Type', request.slipMimeType || 'application/octet-stream');
+    res.setHeader(
+      'Content-Disposition',
+      `inline; filename="${(request.slipOriginalName || 'payment-slip').replace(/"/g, '')}"`
+    );
+    fs.createReadStream(filePath).pipe(res);
+  } catch (error: any) {
+    console.error('[manual-payment] slip read failed', error);
+    res.status(403).json({ error: error?.message || 'Failed to load slip' });
+  }
+});
+
+app.post('/api/manual-payments/:requestId/review', (req, res) => {
+  try {
+    const adminEmail = requireSuperAdmin(req.body?.adminEmail);
+    const decision = String(req.body?.decision || '').trim();
+    const adminNote = String(req.body?.adminNote || '').trim();
+    const existing = manualPaymentService.getById(req.params.requestId);
+
+    if (!existing) {
+      return res.status(404).json({ error: 'Manual payment request not found' });
+    }
+
+    if (decision === 'approve') {
+      if (existing.status === 'approved') {
+        return res.json({ request: existing, applied: false });
+      }
+
+      const approved = manualPaymentService.markApproved(req.params.requestId, adminEmail, adminNote);
+
+      if (approved.feature === 'full_astro_report' && approved.orderId) {
+        premiumAstroReportEngine.confirmManualPayment(
+          approved.orderId,
+          approved.paymentReference || approved.id
+        );
+      }
+
+      if (
+        (approved.feature === 'consultant_starter_200' || approved.feature === 'consultant_premium_500') &&
+        approved.packageCode
+      ) {
+        const packageConfig = getConsultantPackageConfig(approved.packageCode);
+        updateUserCredits(approved.userId, (row) => {
+          row.paid_credits += packageConfig.credits;
+          if (approved.packageCode === 'starter_200') {
+            row.free_messages_used = 4;
+          }
+          if (approved.packageCode === 'premium_500') {
+            row.is_premium = true;
+          }
+        });
+      }
+
+      return res.json({ request: approved, applied: true });
+    }
+
+    if (decision === 'reject') {
+      const rejected = manualPaymentService.markRejected(req.params.requestId, adminEmail, adminNote);
+      return res.json({ request: rejected, applied: true });
+    }
+
+    return res.status(400).json({ error: 'Invalid decision' });
+  } catch (error: any) {
+    console.error('[manual-payment] review failed', error);
+    res.status(400).json({ error: error?.message || 'Failed to review manual payment' });
+  }
+});
+
+app.delete('/api/manual-payments/:requestId', (req, res) => {
+  try {
+    requireSuperAdmin(req.body?.adminEmail || req.query.adminEmail);
+    const deleted = manualPaymentService.deleteRequest(req.params.requestId);
+    res.json({ deleted: true, request: deleted });
+  } catch (error: any) {
+    console.error('[manual-payment] delete failed', error);
+    res.status(400).json({ error: error?.message || 'Failed to delete manual payment request' });
   }
 });
 
