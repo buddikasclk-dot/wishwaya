@@ -162,11 +162,35 @@ const getSinhalaWeeklySummary = (summary: string, rashiName: string) => {
   return translated;
 };
 
+const buildLocalHighlights = (): LuckHighlights => ({
+  auspiciousDirection: 'නැගෙනහිර',
+  inauspiciousDirection: 'බටහිර',
+  luckyDays: ['සඳුදා', 'බ්‍රහස්පතින්දා'],
+  luckyTimes: ['පෙ.ව. 7:30 - පෙ.ව. 9:00', 'ප.ව. 6:00 - ප.ව. 7:00'],
+  luckyColors: ['රතු', 'සුදු'],
+  luckyNumber: '9',
+  weeklyHighlight: 'මෙම සතියේ සන්සුන්ව සහ අවධානයෙන් කටයුතු කිරීමෙන් සුබ ප්‍රගතියක් ලැබේ.',
+});
+
+const buildLocalPredictions = (): Prediction => ({
+  characterTraits: 'ඔබට නායකත්ව ගුණ, කැපවීම සහ ඉක්මනින් ක්‍රියා කිරීමේ හැකියාව පෙනේ. ඉවසීම වැඩි කරගැනීමෙන් යහපත තවත් වැඩි වේ.',
+  health: 'නින්ද, ආහාර සහ මානසික සන්සුන් බව සමබරව තබාගතහොත් සෞඛ්‍යය හොඳ අතට හැරේ.',
+  career: 'රැකියාවේ ඉදිරියට යාමේ අවස්ථා ඇත. නමුත් සැලසුම් සහිතව කටයුතු කිරීම ඉතා වැදගත්ය.',
+  wealth: 'මුදල් පාලනය හොඳින් කළහොත් වියදම් අඩු කරගත හැකි අතර ඉතිරි කිරීමෙන් වාසි ලැබේ.',
+  love: 'සන්සුන් කතාබහ සහ අවබෝධය තුළින් සම්බන්ධතා හොඳින් පවත්වා ගත හැක.',
+  education: 'අනුශාසනය සහ නිතිපතා පාඩම් කිරීමෙන් ඉගෙනීමේ ගුණාත්මකභාවය වැඩි වේ.',
+  general: 'මෙම කාලය මිශ්‍ර නමුත් පාලනය කළ හැකි කාලයකි. යහපත් හැසිරීම් තුළින් අසුබ බලපෑම් අඩු කරගත හැක.',
+  mahaDasha: 'ප්‍රධාන දශා බලය ටිකෙන් ටික දියුණුවට මඟ සලසන බවක් පෙනේ.',
+  antaraDasha: 'අතුරු දශා කාලයේ කෙටි පීඩන ඇතිවිය හැකි නමුත් ඉවසීමෙන් ඒවා පාලනය කළ හැක.',
+  planetaryPositions: 'ග්‍රහ පිහිටීම් අනුව සමබරතාව සහ වගකීම් ගැන වැඩි අවධානයක් අවශ්‍යය.',
+  adviceRemedies: 'ඉක්මනින් අවදි වීම, සන්සුන් සිත පවත්වා ගැනීම සහ ආගමික පුරුදු අනුගමනය කිරීම සුබය.',
+});
+
 const Dashboard: React.FC<DashboardProps> = ({ profile, onNavigate, showPreparationNotice = false }) => {
-  const [highlights, setHighlights] = useState<LuckHighlights | null>(null);
-  const [predictions, setPredictions] = useState<Prediction | null>(null);
-  const [highlightsLoading, setHighlightsLoading] = useState(true);
-  const [predictionsLoading, setPredictionsLoading] = useState(true);
+  const [highlights, setHighlights] = useState<LuckHighlights | null>(() => buildLocalHighlights());
+  const [predictions, setPredictions] = useState<Prediction | null>(() => buildLocalPredictions());
+  const [highlightsLoading, setHighlightsLoading] = useState(false);
+  const [predictionsLoading, setPredictionsLoading] = useState(false);
   const [currentTime, setCurrentTime] = useState(new Date());
 
   useEffect(() => {
@@ -175,23 +199,38 @@ const Dashboard: React.FC<DashboardProps> = ({ profile, onNavigate, showPreparat
   }, []);
 
   useEffect(() => {
+    let cancelled = false;
+
     const load = async () => {
-      try {
-        const loadedHighlights = await getLuckHighlights(profile);
-        setHighlights(loadedHighlights);
-      } finally {
-        setHighlightsLoading(false);
+      setHighlights(buildLocalHighlights());
+      setPredictions(buildLocalPredictions());
+      setHighlightsLoading(true);
+      setPredictionsLoading(true);
+
+      const [highlightsResult, predictionsResult] = await Promise.allSettled([
+        getLuckHighlights(profile),
+        getPredictions(profile),
+      ]);
+
+      if (cancelled) return;
+
+      if (highlightsResult.status === 'fulfilled') {
+        setHighlights(highlightsResult.value);
       }
 
-      try {
-        const loadedPredictions = await getPredictions(profile);
-        setPredictions(loadedPredictions);
-      } finally {
-        setPredictionsLoading(false);
+      if (predictionsResult.status === 'fulfilled') {
+        setPredictions(predictionsResult.value);
       }
+
+      setHighlightsLoading(false);
+      setPredictionsLoading(false);
     };
 
     void load();
+
+    return () => {
+      cancelled = true;
+    };
   }, [profile]);
 
   const rashiTheme = profile.rashi

@@ -27,6 +27,21 @@ const safeJsonParse = (text: string, fallback: any) => {
   }
 };
 
+const withTimeout = async <T>(promise: Promise<T>, timeoutMs = 8000): Promise<T> => {
+  let timer: ReturnType<typeof setTimeout> | null = null;
+
+  try {
+    return await Promise.race([
+      promise,
+      new Promise<T>((_, reject) => {
+        timer = setTimeout(() => reject(new Error('REQUEST_TIMEOUT')), timeoutMs);
+      }),
+    ]);
+  } finally {
+    if (timer) clearTimeout(timer);
+  }
+};
+
 const fallbackPalm = (gender: string): PalmAnalysisResult => ({
   archetype: 'ශක්තිමත් උත්සාහශීලී චරිතය',
   handShape: `${gender === 'female' ? 'වම් අත' : 'දකුණු අත'} අනුව ඔබ ක්‍රියාශීලී සහ ඉවසීමෙන් වැඩ කරන අයෙකි.`,
@@ -109,14 +124,16 @@ export const analyzePalm = async (image: string, gender: string): Promise<PalmAn
     const apiKey = await getApiKey();
     if (!apiKey) return baseResult;
     const ai = new GoogleGenAI({ apiKey });
-    const response = await ai.models.generateContent({
-      model: 'gemini-3-flash-preview',
-      contents: [
-        { text: `${SERVICE_ALIGNMENT_PROTOCOL}\nAnalyze this palm for a ${gender}. Return JSON with archetype, handShape, heartLineDetail, headLineDetail, lifeLineDetail, fateLineDetail, mountsAnalysis, specialMarkings, synthesisAdvice.` },
-        { inlineData: { mimeType: "image/jpeg", data: image.split(',')[1] || image } }
-      ],
-      config: { responseMimeType: "application/json" }
-    });
+    const response = await withTimeout(
+      ai.models.generateContent({
+        model: 'gemini-3-flash-preview',
+        contents: [
+          { text: `${SERVICE_ALIGNMENT_PROTOCOL}\nAnalyze this palm for a ${gender}. Return JSON with archetype, handShape, heartLineDetail, headLineDetail, lifeLineDetail, fateLineDetail, mountsAnalysis, specialMarkings, synthesisAdvice.` },
+          { inlineData: { mimeType: "image/jpeg", data: image.split(',')[1] || image } }
+        ],
+        config: { responseMimeType: "application/json" }
+      })
+    );
     return safeJsonParse(response.text, baseResult);
   } catch {
     return baseResult;
@@ -133,11 +150,13 @@ export const getPersonalizedVastuAnalysis = async (profile: UserProfile, formDat
     if (floorPlan) {
       contents.push({ inlineData: { mimeType: floorPlan.mimeType, data: floorPlan.data.split(',')[1] || floorPlan.data } });
     }
-    const response = await ai.models.generateContent({
-      model: 'gemini-3-flash-preview',
-      contents,
-      config: { responseMimeType: "application/json" }
-    });
+    const response = await withTimeout(
+      ai.models.generateContent({
+        model: 'gemini-3-flash-preview',
+        contents,
+        config: { responseMimeType: "application/json" }
+      })
+    );
     return safeJsonParse(response.text, baseResult);
   } catch {
     return baseResult;
@@ -152,17 +171,19 @@ export const analyzeTraditionalOmen = async (type: string, input: string): Promi
     if (!apiKey) return baseResult;
 
     const ai = new GoogleGenAI({ apiKey });
-    const response = await ai.models.generateContent({
-      model: 'gemini-3-flash-preview',
-      contents: `${SERVICE_ALIGNMENT_PROTOCOL}
+    const response = await withTimeout(
+      ai.models.generateContent({
+        model: 'gemini-3-flash-preview',
+        contents: `${SERVICE_ALIGNMENT_PROTOCOL}
 Enhance the following deterministic omen result in simple Sinhala.
 Do not change the core meaning. Only improve clarity.
 Type: ${type}
 Input: ${input}
 Base Result: ${JSON.stringify(baseResult)}
 Return JSON with prediction, context, remedy.`,
-      config: { responseMimeType: "application/json" }
-    });
+        config: { responseMimeType: "application/json" }
+      })
+    );
 
     const enhanced = safeJsonParse(response.text, null as any);
     if (!enhanced) return baseResult;
@@ -203,17 +224,19 @@ export const getBabyNames = async (details: any): Promise<BabyNamingResult> => {
     if (!apiKey) return baseResult;
 
     const ai = new GoogleGenAI({ apiKey });
-    const response = await ai.models.generateContent({
-      model: 'gemini-3-flash-preview',
-      contents: `${SERVICE_ALIGNMENT_PROTOCOL}
+    const response = await withTimeout(
+      ai.models.generateContent({
+        model: 'gemini-3-flash-preview',
+        contents: `${SERVICE_ALIGNMENT_PROTOCOL}
 Enhance these baby name suggestions based on birth details: ${details.dob} at ${details.time} in ${details.city}.
 The baby is a ${details.gender}.
 The calculated Nakshatra is ${baseResult.nakshatra} and Pada is ${baseResult.pada}.
 The recommended starting letters are: ${baseResult.recommendedLetters.join(', ')}.
 Keep the same core structure and return full JSON with:
 intro, recommendedLetters, nakshatra, pada, boyNames, girlNames, astrologyInsight, amulet, rituals.`,
-      config: { responseMimeType: "application/json" }
-    });
+        config: { responseMimeType: "application/json" }
+      })
+    );
 
     const enhanced = safeJsonParse(response.text, null as any);
     if (!enhanced) return baseResult;
@@ -259,11 +282,13 @@ export const getLuckHighlights = async (profile: UserProfile): Promise<LuckHighl
     const apiKey = await getApiKey();
     if (!apiKey) return fallback;
     const ai = new GoogleGenAI({ apiKey });
-    const response = await ai.models.generateContent({
-      model: 'gemini-3-flash-preview',
-      contents: `${SERVICE_ALIGNMENT_PROTOCOL}\nProvide luck highlights for ${profile.name} (Rashi: ${profile.rashi}). Return JSON with auspiciousDirection, inauspiciousDirection, luckyDays, luckyTimes, luckyColors, luckyNumber, weeklyHighlight.`,
-      config: { responseMimeType: "application/json" }
-    });
+    const response = await withTimeout(
+      ai.models.generateContent({
+        model: 'gemini-3-flash-preview',
+        contents: `${SERVICE_ALIGNMENT_PROTOCOL}\nProvide luck highlights for ${profile.name} (Rashi: ${profile.rashi}). Return JSON with auspiciousDirection, inauspiciousDirection, luckyDays, luckyTimes, luckyColors, luckyNumber, weeklyHighlight.`,
+        config: { responseMimeType: "application/json" }
+      })
+    );
     const data = safeJsonParse(response.text, fallback as LuckHighlights);
   
     const ensureArray = (val: any) => {
@@ -302,11 +327,13 @@ export const getPredictions = async (profile: UserProfile): Promise<Prediction> 
     const apiKey = await getApiKey();
     if (!apiKey) return fallback;
     const ai = new GoogleGenAI({ apiKey });
-    const response = await ai.models.generateContent({
-      model: 'gemini-3-flash-preview',
-      contents: `${SERVICE_ALIGNMENT_PROTOCOL}\nProvide predictions for ${profile.name}. Return JSON with characterTraits, health, career, wealth, love, education, general, mahaDasha, antaraDasha, planetaryPositions, adviceRemedies.`,
-      config: { responseMimeType: "application/json" }
-    });
+    const response = await withTimeout(
+      ai.models.generateContent({
+        model: 'gemini-3-flash-preview',
+        contents: `${SERVICE_ALIGNMENT_PROTOCOL}\nProvide predictions for ${profile.name}. Return JSON with characterTraits, health, career, wealth, love, education, general, mahaDasha, antaraDasha, planetaryPositions, adviceRemedies.`,
+        config: { responseMimeType: "application/json" }
+      })
+    );
     const data = safeJsonParse(response.text, fallback as Prediction);
   
     const ensureString = (val: any) => {
@@ -338,12 +365,15 @@ export const getSpiritualRemedies = async (profile: UserProfile): Promise<Remedy
     const baseResult = generateBasicRemedyResult(profile);
     try {
       const apiKey = await getApiKey();
+      if (!apiKey) return baseResult;
       const ai = new GoogleGenAI({ apiKey });
-      const response = await ai.models.generateContent({
-        model: 'gemini-3-flash-preview',
-        contents: `${SERVICE_ALIGNMENT_PROTOCOL}\nProvide spiritual remedies for ${profile.name} (Rashi: ${profile.rashi}). Return JSON with userConditionFactors, remedies, summary.`,
-        config: { responseMimeType: "application/json" }
-      });
+      const response = await withTimeout(
+        ai.models.generateContent({
+          model: 'gemini-3-flash-preview',
+          contents: `${SERVICE_ALIGNMENT_PROTOCOL}\nProvide spiritual remedies for ${profile.name} (Rashi: ${profile.rashi}). Return JSON with userConditionFactors, remedies, summary.`,
+          config: { responseMimeType: "application/json" }
+        })
+      );
       return safeJsonParse(response.text, baseResult);
     } catch (e) {
       return baseResult;
@@ -356,11 +386,13 @@ export const getGemstoneAdvice = async (profile: UserProfile): Promise<GemstoneA
     const apiKey = await getApiKey();
     if (!apiKey) return baseResult;
     const ai = new GoogleGenAI({ apiKey });
-    const response = await ai.models.generateContent({
-      model: 'gemini-3-flash-preview',
-      contents: `${SERVICE_ALIGNMENT_PROTOCOL}\nProvide gemstone advice for ${profile.name} (Rashi: ${profile.rashi}). Return JSON with gemstone, metal, finger, instructions, benefits.`,
-      config: { responseMimeType: "application/json" }
-    });
+    const response = await withTimeout(
+      ai.models.generateContent({
+        model: 'gemini-3-flash-preview',
+        contents: `${SERVICE_ALIGNMENT_PROTOCOL}\nProvide gemstone advice for ${profile.name} (Rashi: ${profile.rashi}). Return JSON with gemstone, metal, finger, instructions, benefits.`,
+        config: { responseMimeType: "application/json" }
+      })
+    );
     return safeJsonParse(response.text, baseResult);
   } catch {
     return baseResult;
@@ -383,17 +415,19 @@ export const getAuspiciousTimes = async (profile: UserProfile): Promise<Auspicio
     if (!apiKey) return baseResult;
 
     const ai = new GoogleGenAI({ apiKey });
-    const response = await ai.models.generateContent({
-      model: 'gemini-3-flash-preview',
-      contents: `${SERVICE_ALIGNMENT_PROTOCOL}
+    const response = await withTimeout(
+      ai.models.generateContent({
+        model: 'gemini-3-flash-preview',
+        contents: `${SERVICE_ALIGNMENT_PROTOCOL}
 Enhance the following deterministic monthly Subha Nekath for ${profile.name}.
 Current month index: ${currentMonthIndex}.
 Do not change the date, time range, or direction in any item.
 Only improve wording and spiritual context.
 Base Data: ${JSON.stringify(baseResult)}
 Return JSON with business, travel, houseBuilding, marriage.`,
-      config: { responseMimeType: "application/json" }
-    });
+        config: { responseMimeType: "application/json" }
+      })
+    );
 
     const enhanced = safeJsonParse(response.text, null as any);
     return {
@@ -413,11 +447,13 @@ export const getPastLifeReading = async (profile: UserProfile): Promise<any> => 
     const apiKey = await getApiKey();
     if (!apiKey) return baseResult;
     const ai = new GoogleGenAI({ apiKey });
-    const response = await ai.models.generateContent({
-      model: 'gemini-3-flash-preview',
-      contents: `${SERVICE_ALIGNMENT_PROTOCOL}\nProvide past life reading for ${profile.name}. Return JSON with pastKarmicThemes, inheritedStrengths, presentLessons, soulMission, practicalAdvice.`,
-      config: { responseMimeType: "application/json" }
-    });
+    const response = await withTimeout(
+      ai.models.generateContent({
+        model: 'gemini-3-flash-preview',
+        contents: `${SERVICE_ALIGNMENT_PROTOCOL}\nProvide past life reading for ${profile.name}. Return JSON with pastKarmicThemes, inheritedStrengths, presentLessons, soulMission, practicalAdvice.`,
+        config: { responseMimeType: "application/json" }
+      })
+    );
     return safeJsonParse(response.text, baseResult);
   } catch {
     return baseResult;
@@ -430,11 +466,13 @@ export const interpretDream = async (dream: string): Promise<any> => {
     const apiKey = await getApiKey();
     if (!apiKey) return baseResult;
     const ai = new GoogleGenAI({ apiKey });
-    const response = await ai.models.generateContent({
-      model: 'gemini-3-flash-preview',
-      contents: `${SERVICE_ALIGNMENT_PROTOCOL}\nInterpret dream: ${dream}. Return JSON with meaning, symbols, spiritualContext, psychologicalInsight, planetaryInfluence, actionableAdvice.`,
-      config: { responseMimeType: "application/json" }
-    });
+    const response = await withTimeout(
+      ai.models.generateContent({
+        model: 'gemini-3-flash-preview',
+        contents: `${SERVICE_ALIGNMENT_PROTOCOL}\nInterpret dream: ${dream}. Return JSON with meaning, symbols, spiritualContext, psychologicalInsight, planetaryInfluence, actionableAdvice.`,
+        config: { responseMimeType: "application/json" }
+      })
+    );
     return safeJsonParse(response.text, baseResult);
   } catch {
     return baseResult;
@@ -447,15 +485,17 @@ export const enhancePorondamWithGemini = async (profile: UserProfile, partner: a
     if (!apiKey) return localResult;
 
     const ai = new GoogleGenAI({ apiKey });
-    const response = await ai.models.generateContent({
-      model: 'gemini-3-flash-preview',
-      contents: `${SERVICE_ALIGNMENT_PROTOCOL}
+    const response = await withTimeout(
+      ai.models.generateContent({
+        model: 'gemini-3-flash-preview',
+        contents: `${SERVICE_ALIGNMENT_PROTOCOL}
 Enhance the provided deterministic 20-term Porondam result for ${profile.name} and ${partner.name}.
 Do not change the matchingPercentage or isMatch values.
 Only improve each row's description and result text, and optionally expand dosha/recommendations.
 Return JSON only.`,
-      config: { responseMimeType: "application/json" }
-    });
+        config: { responseMimeType: "application/json" }
+      })
+    );
 
     const enhanced = safeJsonParse(response.text, null as any);
     if (!enhanced || !Array.isArray(localResult.table)) return localResult;
@@ -495,14 +535,17 @@ Return JSON only.`,
 export const analyzeRashiChakra = async (base64Image: string): Promise<string> => {
     try {
       const apiKey = await getApiKey();
+      if (!apiKey) return "Unknown";
       const ai = new GoogleGenAI({ apiKey });
-      const response = await ai.models.generateContent({
-        model: 'gemini-3-flash-preview',
-        contents: [
-          { text: `${SERVICE_ALIGNMENT_PROTOCOL}\nIdentify the Rashi (Zodiac sign) from this Sri Lankan Rashi Chakra image. Return ONLY the English name of the Rashi.` },
-          { inlineData: { mimeType: "image/jpeg", data: base64Image } }
-        ]
-      });
+      const response = await withTimeout(
+        ai.models.generateContent({
+          model: 'gemini-3-flash-preview',
+          contents: [
+            { text: `${SERVICE_ALIGNMENT_PROTOCOL}\nIdentify the Rashi (Zodiac sign) from this Sri Lankan Rashi Chakra image. Return ONLY the English name of the Rashi.` },
+            { inlineData: { mimeType: "image/jpeg", data: base64Image } }
+          ]
+        })
+      );
       return response.text?.trim() || "Unknown";
     } catch (e) {
       return "Unknown";
