@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useEffect, useState } from 'react';
 import { ResultLoadingScreen } from './ResultLoadingScreen';
 
 const AVURUDU_DATA = [
@@ -6,58 +6,74 @@ const AVURUDU_DATA = [
     name: 'පරණ අවුරුද්ද සඳහා ස්නානය',
     enName: 'Old Year Bathing',
     date: 'අප්‍රේල් 13',
-    time: '-',
-    instructions: 'දිවුල් පත් යුෂ මිශ්‍ර නානු ගා ස්නානය කිරීම මැනවි.',
-    highlight: 'Wood apple leaves.'
+    time: 'සඳු දින',
+    instructions:
+      'අප්‍රේල් මස 13 වැනි සදු දින දිවුල් පත් යුෂ මිශ්‍ර නානු ගා ස්නානය කොට ඉෂ්ට දේවතා අනුස්මරණයේ යෙදී වාසය මැනවී.',
+    highlight: 'දිවුල් පත් යුෂ මිශ්‍ර නානු ගා ස්නානය.'
+  },
+  {
+    name: 'අලූත් අවුරුදු උදාව',
+    enName: 'Dawn of New Year',
+    date: 'අප්‍රේල් 14',
+    time: 'පූර්ව භාග 09.32',
+    instructions:
+      'අප්‍රේල් මස 14 වැනි අඟහරුවාදා පූර්ව භාග 09.32 ට සිංහල අලූත් අවුරුද්ද උදාවෙයි.',
+    highlight: 'සිංහල අලූත් අවුරුද්ද උදාවෙයි.'
   },
   {
     name: 'පුණ්‍ය කාලය',
     enName: 'Punya Kalaya',
-    date: 'අප්‍රේල් 13 - 14',
-    time: 'අප්‍රේල් 13 ප.ව. 8:57 සිට 14 පෙ.ව. 9:45 දක්වා',
-    instructions: 'ආගමික වතාවත්වල නිරත වීම සුබයි.',
-    highlight: 'Spiritual activities.'
-  },
-  {
-    name: 'අලුත් අවුරුදු උදාව',
-    enName: 'Dawn of New Year',
     date: 'අප්‍රේල් 14',
-    time: 'පෙ.ව. 3:21',
-    instructions: 'අලුත් අවුරුදු උදාව.',
-    highlight: 'New Year begins.'
+    time: 'පූර්ව භාග 03.08 - අපර භාග 03.56',
+    instructions:
+      'අප්‍රේල් මස 14 වැනි අගහරුවාදා පූර්ව භාග 03.08 සිට එදිනම අපර භාග 03.56 දක්වා',
+    highlight: 'ආගමික කටයුතු සඳහා සුදුසු පුණ්‍ය කාලය.'
   },
   {
     name: 'ආහාර පිසීම',
     enName: 'Cooking Meals',
     date: 'අප්‍රේල් 14',
-    time: 'පෙ.ව. 4:04',
-    instructions: 'දකුණු දිශාව බලා තඹ පැහැති වස්ත්‍රයෙන් සැරසී ලිප් බැඳ ගිනි මොලවා ආහාර පිසීම සුබයි.',
-    highlight: 'South / Copper clothes.'
+    time: 'පූර්ව භාග 10.41',
+    instructions:
+      'අප්‍රේල් මස 14 වෙනි අගහරුවාදා පූර්ව භාග 10.41 ට රක්ත වර්ණ වස්ත්‍රාභරණයෙන් සැරසී දකුණු දිශාව බලා ලිප් බැද ගිණි මොලවා කිරි බතක්ද, කැවිලි වර්ගයක්ද, දී කිරි වලද ද, පිලියෙල කර ගැනීම මැනවි.',
+    highlight: 'රක්ත වර්ණයෙන් සැරසී දකුණු දිශාව බලා.'
   },
   {
-    name: 'වැඩ ඇල්ලීම හා ආහාර අනුභවය',
-    enName: 'Work & Meals',
+    name: 'වැඩ ඇල්ලීම, ගණුදෙනු කිරීම හා ආහාර අනුභවය',
+    enName: 'Work, Transactions and Meals',
     date: 'අප්‍රේල් 14',
-    time: 'පෙ.ව. 6:44',
-    instructions: 'දකුණු දිශාව බලා සුදු හෝ මුතු පැහැති වස්ත්‍රයෙන් සැරසී වැඩ අල්ලා ආහාර අනුභවය සුබයි.',
-    highlight: 'South / White or Pearl clothes.'
+    time: 'අපර භාග 12.05',
+    instructions:
+      'අප්‍රේල් මස 14 වෙනි අඟහරුවාදා අපර භාග 12.05 ට රක්ත වර්ණ වස්ත්‍රාභරණයෙන් සැරසී දකුණු දිශාව බලා සියලු වැඩ අල්ලා ගමුදෙනු කොට ආහාර අනුභවය කිරීම මැනවි.',
+    highlight: 'සියලු වැඩ ඇල්ලීම හා ගනුදෙනු ආරම්භයට සුදුසු වේලාව.'
   },
   {
     name: 'හිසතෙල් ගෑම',
     enName: 'Anointing Oil',
-    date: 'අප්‍රේල් 16',
-    time: 'පෙ.ව. 9:04',
-    instructions: 'උතුරු දිශාව බලා කොළ පැහැති වස්ත්‍රයෙන් සැරසී හිසතෙල් ගෑම සුබයි.',
-    highlight: 'North / Green clothes.'
+    date: 'අප්‍රේල් 15',
+    time: 'පූර්ව භාග 06.54',
+    instructions:
+      'අප්‍රේල් මස 15 වෙහි බදාදා පූර්ව භාග 06.54 ට නැගෙනහිර දිශාව බලා හිසට කොහොඹ පත්ද, පයට කොළොන් පද, තබා පච්ච වර්ගා වස්ත්‍රාභරණයෙන් සැරසී කොහොඹ පත් යුෂ මිශ්‍ර භානු හා තෙල් ගා ස්නානය කිරීම මැනවි.',
+    highlight: 'නැගෙනහිර දිශාව බලා කොහොඹ පත් යුෂ මිශ්‍ර භානු හා තෙල්.'
   },
   {
-    name: 'රැකීරක්ෂා සඳහා පිටත්වීම',
+    name: 'රැකී රක්ෂා සඳහා පිටත්ව යෑම',
     enName: 'Leaving for Work',
-    date: 'අප්‍රේල් 17',
-    time: 'පෙ.ව. 9:03',
-    instructions: 'උතුරු දිශාව බලා රන්වන් පැහැති වස්ත්‍රයෙන් සැරසී රැකීරක්ෂා සඳහා පිටත්වීම සුබයි.',
-    highlight: 'North / Gold clothes.'
+    date: 'අප්‍රේල් 20',
+    time: 'පූර්ව භාග 06.27',
+    instructions:
+      'අප්‍රේල් මස 20 වැනි සඳුදා පූර්ව භාග 06.27 ට ශ්වේත වර්ණ වස්ත්‍රාභරණයෙන් සැරසී කිරිබත් සහ එළකිරි මිශ්‍ර කැවිලිද අනුභව කර දකුණු දිශාව බලා පිටත් වීම මැනවි.',
+    highlight: 'ශ්වේත වර්ණයෙන් සැරසී කිරිබත් අනුභව කර දකුණු දිශාව බලා.'
   },
+  {
+    name: 'පැළ සිටුවීමට',
+    enName: 'Planting',
+    date: 'අප්‍රේල් 23',
+    time: 'පූර්ව භාග 11.36',
+    instructions:
+      'අප්‍රේල් මස 23 වැනි බ්‍රහස්පතින්දා රන්වන් පැහැති වස්ත්‍රාභරණයෙන් සැරසී පූර්ව භාග 11.36 ට උතුරු දිශාව බලා පැළ සිටුවීම මැනවි.',
+    highlight: 'රන්වන් පැහැති වස්ත්‍රාභරණයෙන් සැරසී උතුරු දිශාව බලා.'
+  }
 ];
 
 const AvuruduNekath: React.FC = () => {
@@ -81,18 +97,18 @@ const AvuruduNekath: React.FC = () => {
 
   if (showLoading) {
     return (
-      <ResultLoadingScreen 
-        isReady={true} 
+      <ResultLoadingScreen
+        isReady={true}
         onComplete={handleComplete}
         icon="☀️"
         title="අලුත් අවුරුදු නැකත් සකස් කරමින්..."
         subtitle="මෙය සකස් කිරීමට තත්පර 30ක් පමණ ගතවනු ඇත. කරුණාකර රැඳී සිටින්න."
         colorTheme="amber"
         messages={[
-          "Preparing Aurudu Nekath schedule...",
-          "Checking traditional timings...",
-          "Loading Sinhala & Tamil New Year guidance...",
-          "Aligning auspicious moments..."
+          'Preparing Aurudu Nekath schedule...',
+          'Checking traditional timings...',
+          'Loading Sinhala & Tamil New Year guidance...',
+          'Aligning auspicious moments...'
         ]}
       />
     );
@@ -105,34 +121,30 @@ const AvuruduNekath: React.FC = () => {
           <span className="text-5xl animate-pulse">🏮</span>
         </div>
         <h2 className="text-3xl font-black sinhala text-gray-800">2026 අලුත් අවුරුදු නැකත්</h2>
-        <p className="text-orange-600 text-[10px] font-bold uppercase tracking-[0.3em]">Sinhala & Tamil New Year 2026</p>
+        <p className="text-orange-600 text-[10px] font-bold uppercase tracking-[0.3em]">
+          Sinhala & Tamil New Year 2026
+        </p>
       </header>
 
       <div className="space-y-6">
         {AVURUDU_DATA.map((item, index) => (
-          <div 
-            key={index} 
+          <div
+            key={index}
             className="bg-white p-6 rounded-[2.5rem] zen-shadow border border-white transition-all hover:translate-y-[-2px]"
           >
             <div className="flex justify-between items-start mb-4">
               <div className="space-y-1">
-                <h3 className="sinhala font-black text-lg text-gray-800 leading-tight">
-                  {item.name}
-                </h3>
-                <p className="text-[10px] text-gray-400 font-bold uppercase tracking-wider">
-                  {item.enName}
-                </p>
+                <h3 className="sinhala font-black text-lg text-gray-800 leading-tight">{item.name}</h3>
+                <p className="text-[10px] text-gray-400 font-bold uppercase tracking-wider">{item.enName}</p>
               </div>
               <div className="bg-orange-50 px-3 py-1 rounded-full flex flex-col items-center min-w-[60px]">
                 <span className="sinhala text-[10px] font-black text-orange-600">{item.date}</span>
-                <span className="text-[9px] font-bold text-orange-400 uppercase">{item.time === '-' ? 'Day' : item.time}</span>
+                <span className="text-[9px] font-bold text-orange-400 uppercase">{item.time}</span>
               </div>
             </div>
 
             <div className="bg-gray-50/50 p-4 rounded-2xl border border-gray-100/50 space-y-2">
-              <p className="sinhala text-sm text-gray-600 leading-relaxed italic">
-                {item.instructions}
-              </p>
+              <p className="sinhala text-sm text-gray-600 leading-relaxed italic">{item.instructions}</p>
               <div className="flex items-center space-x-2 pt-1">
                 <span className="text-xs">📍</span>
                 <p className="text-[11px] font-black text-gray-400 uppercase tracking-tighter">
